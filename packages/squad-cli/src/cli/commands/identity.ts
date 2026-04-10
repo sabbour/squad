@@ -118,7 +118,7 @@ function buildManifest(appName: string, username: string, callbackUrl: string): 
   return {
     name: appName,
     url: `https://github.com/${username}`,
-    hook_attributes: { url: callbackUrl, active: false },
+    hook_attributes: { url: `https://example.com/no-op`, active: false },
     redirect_url: callbackUrl,
     public: false,
     default_permissions: DEFAULT_PERMISSIONS,
