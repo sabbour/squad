@@ -334,6 +334,6 @@ describe('loadRatePool', () => {
     const pool = await loadRatePool(undefined);
     // Result depends on whether ~/.squad/rate-pool.json exists,
     // but the function should not throw.
-    expect(pool === null || (pool && typeof pool.totalLimit === 'number')).toBe(true);
+    expect(pool === null || typeof pool.totalLimit === 'number').toBe(true);
   });
 });

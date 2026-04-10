@@ -314,7 +314,7 @@ describe('loadCapabilities edge cases', () => {
     const caps = await loadCapabilities(undefined);
     // Result depends on whether ~/.squad/machine-capabilities.json exists,
     // but the function should not throw either way.
-    expect(caps === null || (caps && typeof caps.machine === 'string')).toBe(true);
+    expect(caps === null || typeof caps.machine === 'string').toBe(true);
   });
 
   it('skips malformed JSON and returns null', async () => {
