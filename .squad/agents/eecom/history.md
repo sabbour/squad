@@ -354,3 +354,10 @@ Executed 3 tasks across 2 waves: economy mode (#500, PR #504), node:sqlite fix (
 - **Flight update:** Proposal updated with fork-based workflow section and Copilot CLI integration architecture (GH_TOKEN injection via SquadGitHubClient). Ready for CONTROL security review.
 - **Next phase:** GitHub App token context switching (Phase 2) — requires Copilot CLI integration work
 
+### Spawn Cycle Complete (2026-04-10T20:49:55Z)
+- **Event:** GH_TOKEN injection spawn cycle + auto-install + issue triage
+- **Status:** ✅ eecom-2 (GH_TOKEN wiring) and eecom-4 (auto-install) delivered
+- **Coordinator:** Triaged issues #2-#7, closed #3 (already implemented), assigned #4-#7 to EECOM
+- **Log:** Session and orchestration logs written
+- **Next:** Continue with remaining identity issues (#5, #6, #7)
+
