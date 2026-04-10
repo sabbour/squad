@@ -280,21 +280,37 @@ async function exchangeManifestCode(code: string): Promise<{
 
 /**
  * Get the installation ID for a newly created app.
- * Lists installations and returns the first one.
+ * Uses fetch with JWT auth, falling back to curl for WSL compatibility.
  */
 async function getAppInstallationId(jwt: string): Promise<number | null> {
-  const response = await fetch('https://api.github.com/app/installations', {
-    headers: {
-      Authorization: `Bearer ${jwt}`,
-      Accept: 'application/vnd.github+json',
-      'X-GitHub-Api-Version': '2022-11-28',
-    },
-  });
+  // Try fetch first
+  try {
+    const response = await fetch('https://api.github.com/app/installations', {
+      headers: {
+        Authorization: `Bearer ${jwt}`,
+        Accept: 'application/vnd.github+json',
+        'X-GitHub-Api-Version': '2022-11-28',
+      },
+    });
 
-  if (!response.ok) return null;
+    if (!response.ok) return null;
 
-  const installations = (await response.json()) as Array<{ id: number }>;
-  return installations[0]?.id ?? null;
+    const installations = (await response.json()) as Array<{ id: number }>;
+    return installations[0]?.id ?? null;
+  } catch {
+    // fetch failed (WSL DNS issue) — fall back to curl
+  }
+
+  try {
+    const result = execSync(
+      `curl -sf -H "Authorization: Bearer ${jwt}" -H "Accept: application/vnd.github+json" https://api.github.com/app/installations`,
+      { encoding: 'utf-8', timeout: 15_000, stdio: ['pipe', 'pipe', 'pipe'] },
+    );
+    const installations = JSON.parse(result) as Array<{ id: number }>;
+    return installations[0]?.id ?? null;
+  } catch {
+    return null;
+  }
 }
 
 /**
