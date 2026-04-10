@@ -427,3 +427,38 @@ Full policy documented in `.squad/skills/versioning-policy/SKILL.md`.
 
 **Impact:** Image generation prompts live at `docs/proposals/agent-avatar-prompts.md`. Any new Squad roles should follow the same design system (dark bg, single accent, geometric motif). Color assignments are documented in the prompt file's color system table.
 
+
+
+---
+
+### 2026-04-10T19:52:00Z: User directive — fork-based workflow for GitHub App identity
+**By:** Ahmed Sabbour (via Copilot)
+
+**What:** You wouldn't install Squad identity apps on someone else's repo directly — you'd install them on your fork of that repo. This is the natural GitHub workflow: fork → install your Squad apps → work. The proposal's "cloning foreign repos" section should reflect this: the identity model works on forks, not upstream repos you don't own.
+
+**Why:** User request — aligns the identity model with standard GitHub fork-based contribution workflows. Captured for team memory.
+
+---
+
+### 2026-04-10T19:53:00Z: User directive — Copilot CLI integration with identity module
+**By:** Ahmed Sabbour (via Copilot)
+
+**What:** The identity system must work seamlessly with GitHub Copilot CLI as the preferred mode of interaction. When agents spawn via `task` tool calls and make GitHub API calls (commenting, committing, opening PRs), the identity module should transparently switch auth context so those operations go through the role's GitHub App token instead of the user's `gh` CLI auth. Consider: Copilot CLI agents don't have direct access to the identity module — Squad's runtime wraps `gh` calls. The `SquadGitHubClient` needs to intercept or wrap the `gh` CLI calls that agents make, substituting the App token for the user's token when identity is configured.
+
+**Why:** User request — the identity system is useless if it doesn't integrate with how agents actually work (via Copilot CLI spawning). Captured for team memory.
+
+---
+
+### 2026-04-10: Decision — Identity storage functions are synchronous
+**By:** EECOM (Core Dev)
+**Phase:** Identity Module MVP
+
+**Context:** Identity module Phase 1 MVP is complete.
+
+**Decision:** Identity storage functions (`loadIdentityConfig`, `saveIdentityConfig`, `loadAppRegistration`, `saveAppRegistration`, `hasPrivateKey`) are synchronous using `node:fs` sync APIs.
+
+**Rationale:** Identity config is read during CLI startup to resolve which GitHub App credentials to use. This happens before any async work begins. Sync reads keep the startup path simple and avoid unnecessary async ceremony for small JSON files.
+
+**Implications:**
+- Storage functions take the **project root** path (parent of `.squad/`), not the `.squad/` dir
+- If identity resolution ever needs to go async (e.g., remote key vaults), these will need an async wrapper — but that's a Phase 2 concern

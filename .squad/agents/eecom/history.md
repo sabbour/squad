@@ -13,3 +13,13 @@
 - `formatCommitMessage` takes `{ agentName, message }` object.
 - SDK subpath exports (e.g., `@bradygaster/squad-sdk/identity`) require an entry in `packages/squad-sdk/package.json` `"exports"` map.
 
+
+## Team Updates (2026-04-10)
+
+### Orchestration Complete
+- **Event:** Identity module Phase 1 MVP completion + test suite + decision merge
+- **Status:** ✅ All deliverables committed
+- **Decisions merged:** Fork-based workflow (GitHub App identity on forks, not upstream), Copilot CLI integration (auth context switching for spawned agents), identity storage sync functions
+- **Cross-team:** FIDO completed 34 test cases. All tests passing.
+- **Next phase:** GitHub App token context switching (Phase 2) — requires Copilot CLI integration work
+
