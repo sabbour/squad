@@ -2,20 +2,54 @@
  * squad identity — manage agent GitHub App identity.
  *
  * Usage:
- *   squad identity status   — show identity configuration and app registration status
- *   squad identity create   — (stub) instructions for creating GitHub App identities
+ *   squad identity status                — show identity configuration and app registration status
+ *   squad identity create --role lead    — create a GitHub App for a single role
+ *   squad identity create --all          — create GitHub Apps for all 8 roles
+ *   squad identity create --simple       — create a single shared GitHub App
+ *
+ * The create flow uses the GitHub App Manifest flow:
+ *   1. Generate a manifest JSON describing the app
+ *   2. Start a local HTTP server to catch the redirect callback
+ *   3. Open the browser to GitHub's app creation page
+ *   4. Wait for the redirect with the `code` parameter
+ *   5. Exchange the code for app credentials
+ *   6. Save credentials to `.squad/identity/`
  *
  * @module cli/commands/identity
  */
 
 import { join } from 'node:path';
-import { existsSync, readdirSync } from 'node:fs';
+import { existsSync, readdirSync, writeFileSync, mkdirSync } from 'node:fs';
+import { createServer } from 'node:http';
+import { exec } from 'node:child_process';
+import { platform } from 'node:os';
 import {
   loadIdentityConfig,
+  saveIdentityConfig,
   loadAppRegistration,
+  saveAppRegistration,
   hasPrivateKey,
 } from '@bradygaster/squad-sdk';
+import type { IdentityConfig, IdentityTier, RoleSlug } from '@bradygaster/squad-sdk';
 import { BOLD, RESET, GREEN, DIM, RED, YELLOW } from '../core/output.js';
+
+/** All canonical role slugs. */
+const ALL_ROLES: readonly RoleSlug[] = [
+  'lead', 'frontend', 'backend', 'tester', 'devops', 'docs', 'security', 'data',
+];
+
+/** Default permissions for squad GitHub Apps. */
+const DEFAULT_PERMISSIONS = {
+  issues: 'write',
+  pull_requests: 'write',
+  contents: 'write',
+  metadata: 'read',
+  statuses: 'write',
+} as const;
+
+// ============================================================================
+// Helpers
+// ============================================================================
 
 function resolveSquadDir(cwd: string): string | null {
   let dir = cwd;
@@ -38,6 +72,231 @@ function listAgents(projectRoot: string): string[] {
     .filter(d => d.isDirectory())
     .map(d => d.name);
 }
+
+/**
+ * Get the GitHub username via `gh api user`.
+ * Falls back to 'squad-user' if gh CLI is not available.
+ */
+async function getGitHubUsername(): Promise<string> {
+  return new Promise((resolve) => {
+    exec('gh api user --jq .login', { timeout: 10_000 }, (err, stdout) => {
+      if (err || !stdout.trim()) {
+        resolve('squad-user');
+      } else {
+        resolve(stdout.trim());
+      }
+    });
+  });
+}
+
+/**
+ * Open a URL in the default browser (cross-platform).
+ * Falls back to printing the URL if opening fails.
+ */
+function openBrowser(url: string): void {
+  const os = platform();
+  let cmd: string;
+  if (os === 'darwin') {
+    cmd = `open "${url}"`;
+  } else if (os === 'win32') {
+    cmd = `start "" "${url}"`;
+  } else {
+    cmd = `xdg-open "${url}"`;
+  }
+  exec(cmd, (err) => {
+    if (err) {
+      console.log(`\n  ${YELLOW}⚠️${RESET}  Could not open browser automatically.`);
+      console.log(`  Open this URL manually:\n  ${DIM}${url}${RESET}\n`);
+    }
+  });
+}
+
+/**
+ * Build the GitHub App manifest JSON for the manifest flow.
+ */
+function buildManifest(appName: string, username: string, callbackUrl: string): object {
+  return {
+    name: appName,
+    url: `https://github.com/${username}`,
+    hook_attributes: { url: callbackUrl, active: false },
+    redirect_url: callbackUrl,
+    public: false,
+    default_permissions: DEFAULT_PERMISSIONS,
+    default_events: [],
+  };
+}
+
+/**
+ * Start a local HTTP server, serve the manifest form page, and wait for
+ * the GitHub redirect with the `code` parameter.
+ *
+ * Returns the code from the callback.
+ */
+async function waitForManifestCode(
+  manifest: object,
+): Promise<{ code: string; port: number }> {
+  return new Promise((resolve, reject) => {
+    const server = createServer((req, res) => {
+      const url = new URL(req.url ?? '/', `http://localhost`);
+
+      // Serve the auto-submitting form page at /
+      if (url.pathname === '/' && !url.searchParams.has('code')) {
+        const manifestJson = JSON.stringify(manifest);
+        res.writeHead(200, { 'Content-Type': 'text/html' });
+        res.end(`<!DOCTYPE html>
+<html><head><title>Squad — GitHub App Setup</title></head>
+<body>
+  <h2>Creating GitHub App...</h2>
+  <p>If the form doesn't submit automatically, click the button below.</p>
+  <form id="manifest-form" action="https://github.com/settings/apps/new" method="post">
+    <input type="hidden" name="manifest" value='${manifestJson.replace(/'/g, '&#39;')}'>
+    <button type="submit">Create GitHub App</button>
+  </form>
+  <script>document.getElementById('manifest-form').submit();</script>
+</body></html>`);
+        return;
+      }
+
+      // Handle the callback with the code
+      const code = url.searchParams.get('code');
+      if (code) {
+        res.writeHead(200, { 'Content-Type': 'text/html' });
+        res.end(`<!DOCTYPE html>
+<html><head><title>Squad — Success</title></head>
+<body>
+  <h2>✅ GitHub App created!</h2>
+  <p>You can close this tab and return to the terminal.</p>
+</body></html>`);
+        server.close();
+        resolve({ code, port: (server.address() as { port: number }).port });
+        return;
+      }
+
+      res.writeHead(404);
+      res.end('Not found');
+    });
+
+    server.listen(0, '127.0.0.1', () => {
+      const addr = server.address();
+      if (!addr || typeof addr === 'string') {
+        reject(new Error('Failed to start local server'));
+        return;
+      }
+      const port = addr.port;
+      const localUrl = `http://localhost:${port}`;
+      console.log(`\n  ${DIM}Local callback server listening on ${localUrl}${RESET}`);
+      openBrowser(localUrl);
+      console.log(`  Waiting for GitHub App creation...\n`);
+    });
+
+    server.on('error', reject);
+
+    // Timeout after 5 minutes
+    setTimeout(() => {
+      server.close();
+      reject(new Error('Timed out waiting for GitHub App creation (5 min)'));
+    }, 5 * 60 * 1000);
+  });
+}
+
+/**
+ * Exchange the manifest code for app credentials via GitHub API.
+ */
+async function exchangeManifestCode(code: string): Promise<{
+  id: number;
+  slug: string;
+  pem: string;
+  webhook_secret: string;
+  client_id: string;
+  client_secret: string;
+}> {
+  const url = `https://api.github.com/app-manifests/${code}/conversions`;
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      Accept: 'application/vnd.github+json',
+      'X-GitHub-Api-Version': '2022-11-28',
+    },
+  });
+
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`GitHub API error ${response.status}: ${body}`);
+  }
+
+  const data = (await response.json()) as {
+    id: number;
+    slug: string;
+    pem: string;
+    webhook_secret: string;
+    client_id: string;
+    client_secret: string;
+  };
+
+  return data;
+}
+
+/**
+ * Get the installation ID for a newly created app.
+ * Lists installations and returns the first one.
+ */
+async function getAppInstallationId(jwt: string): Promise<number | null> {
+  const response = await fetch('https://api.github.com/app/installations', {
+    headers: {
+      Authorization: `Bearer ${jwt}`,
+      Accept: 'application/vnd.github+json',
+      'X-GitHub-Api-Version': '2022-11-28',
+    },
+  });
+
+  if (!response.ok) return null;
+
+  const installations = (await response.json()) as Array<{ id: number }>;
+  return installations[0]?.id ?? null;
+}
+
+/**
+ * Save credentials from the manifest flow to the identity directory.
+ */
+function saveCredentials(
+  projectRoot: string,
+  key: string,
+  appData: { id: number; slug: string; pem: string },
+  installationId: number,
+  tier: IdentityTier,
+  roleSlug?: RoleSlug,
+): void {
+  // Save PEM key
+  const keysDir = join(projectRoot, '.squad', 'identity', 'keys');
+  mkdirSync(keysDir, { recursive: true });
+  writeFileSync(join(keysDir, `${key}.pem`), appData.pem, 'utf-8');
+
+  // Save app registration
+  saveAppRegistration(projectRoot, key, {
+    appId: appData.id,
+    appSlug: appData.slug,
+    installationId,
+    roleSlug,
+    tier,
+  });
+
+  // Update config
+  const config = loadIdentityConfig(projectRoot) ?? { tier, apps: {} };
+  config.tier = tier;
+  if (!config.apps) config.apps = {};
+  config.apps[key] = {
+    appId: appData.id,
+    appSlug: appData.slug,
+    installationId,
+    roleSlug,
+    tier,
+  };
+  saveIdentityConfig(projectRoot, config);
+}
+
+// ============================================================================
+// Subcommands
+// ============================================================================
 
 function runStatus(projectRoot: string): void {
   const config = loadIdentityConfig(projectRoot);
@@ -86,17 +345,122 @@ function runStatus(projectRoot: string): void {
   console.log();
 }
 
-function runCreate(): void {
-  console.log(`\n${BOLD}squad identity create${RESET} — GitHub App identity setup\n`);
-  console.log(`  This feature is under development. To set up identity manually:\n`);
-  console.log(`  1. Create a GitHub App at ${DIM}https://github.com/settings/apps/new${RESET}`);
-  console.log(`  2. Install the app on your repository`);
-  console.log(`  3. Save the app credentials to ${BOLD}.squad/identity/${RESET}:`);
-  console.log(`     ${DIM}config.json${RESET}     — identity tier and app mapping`);
-  console.log(`     ${DIM}apps/{key}.json${RESET} — app registration (appId, installationId)`);
-  console.log(`     ${DIM}keys/{key}.pem${RESET}  — private key file`);
-  console.log(`\n  ${YELLOW}⚠️${RESET}  Add ${BOLD}.squad/identity/keys/${RESET} to .gitignore — never commit private keys.\n`);
+/**
+ * Create a GitHub App for a single role (or 'shared') using the manifest flow.
+ */
+async function createAppForRole(
+  projectRoot: string,
+  key: string,
+  username: string,
+  tier: IdentityTier,
+  roleSlug?: RoleSlug,
+): Promise<boolean> {
+  const appName = tier === 'shared'
+    ? `${username}-squad`
+    : `${username}-squad-${key}`;
+
+  console.log(`\n${BOLD}Creating GitHub App: ${appName}${RESET}`);
+
+  // Build manifest — port is determined when server starts, so use placeholder
+  // that gets replaced once we know the port
+  const callbackPlaceholder = 'http://localhost:0';
+  const manifest = buildManifest(appName, username, callbackPlaceholder);
+
+  try {
+    // Wait for the code from the manifest flow
+    const { code } = await waitForManifestCode(manifest);
+
+    console.log(`  ${DIM}Received code, exchanging for credentials...${RESET}`);
+
+    // Exchange code for app credentials
+    const appData = await exchangeManifestCode(code);
+
+    // Generate a JWT to fetch installations
+    const { generateAppJWT } = await import('@bradygaster/squad-sdk');
+    const jwt = await generateAppJWT(appData.id, appData.pem);
+
+    // Get installation ID (user needs to install the app first)
+    let installationId = await getAppInstallationId(jwt);
+
+    if (!installationId) {
+      console.log(`\n  ${YELLOW}⚠️${RESET}  No installation found for ${appName}.`);
+      console.log(`  Install the app on your repository at:`);
+      console.log(`  ${DIM}https://github.com/settings/apps/${appData.slug}/installations${RESET}`);
+      console.log(`  Then run ${BOLD}squad identity status${RESET} to verify.\n`);
+      // Save with installationId 0 — user will need to update after installing
+      installationId = 0;
+    }
+
+    // Save credentials
+    saveCredentials(projectRoot, key, appData, installationId, tier, roleSlug);
+
+    console.log(`${GREEN}✅${RESET} Created ${BOLD}${appName}${RESET} — app ID ${appData.id}`);
+    return true;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`${RED}✗${RESET} Failed to create ${appName}: ${msg}`);
+    return false;
+  }
 }
+
+async function runCreate(projectRoot: string, args: string[]): Promise<void> {
+  // Parse flags
+  const isAll = args.includes('--all');
+  const isSimple = args.includes('--simple');
+  const roleIndex = args.indexOf('--role');
+  const roleArg = roleIndex >= 0 ? args[roleIndex + 1] : undefined;
+
+  // Validate mutually exclusive flags
+  const flagCount = [isAll, isSimple, !!roleArg].filter(Boolean).length;
+  if (flagCount > 1) {
+    console.error(`${RED}✗${RESET} Use only one of: --role <role>, --all, --simple`);
+    process.exit(1);
+  }
+
+  if (flagCount === 0) {
+    console.log(`\n${BOLD}squad identity create${RESET} — create GitHub App identities\n`);
+    console.log(`  ${BOLD}--role <role>${RESET}  Create app for a single role (${ALL_ROLES.join(', ')})`);
+    console.log(`  ${BOLD}--all${RESET}          Create apps for all ${ALL_ROLES.length} roles`);
+    console.log(`  ${BOLD}--simple${RESET}       Create a single shared app\n`);
+    console.log(`  Example: ${DIM}squad identity create --role lead${RESET}\n`);
+    return;
+  }
+
+  const username = await getGitHubUsername();
+  console.log(`  GitHub user: ${BOLD}${username}${RESET}`);
+
+  if (isSimple) {
+    // Single shared app
+    await createAppForRole(projectRoot, 'shared', username, 'shared');
+    return;
+  }
+
+  if (roleArg) {
+    // Validate role
+    if (!ALL_ROLES.includes(roleArg as RoleSlug)) {
+      console.error(`${RED}✗${RESET} Unknown role: ${roleArg}`);
+      console.error(`  Valid roles: ${ALL_ROLES.join(', ')}`);
+      process.exit(1);
+    }
+    await createAppForRole(projectRoot, roleArg, username, 'per-role', roleArg as RoleSlug);
+    return;
+  }
+
+  if (isAll) {
+    // Create apps for all roles sequentially
+    console.log(`\n  Creating apps for all ${ALL_ROLES.length} roles...`);
+    let successCount = 0;
+    for (const role of ALL_ROLES) {
+      const ok = await createAppForRole(projectRoot, role, username, 'per-role', role);
+      if (ok) successCount++;
+    }
+    console.log(`\n${GREEN}✅${RESET} Created ${successCount}/${ALL_ROLES.length} apps.\n`);
+  }
+}
+
+// ============================================================================
+// Entry point
+// ============================================================================
 
 export async function runIdentity(cwd: string, subArgs: string[]): Promise<void> {
   const sub = subArgs[0]?.toLowerCase();
@@ -112,12 +476,19 @@ export async function runIdentity(cwd: string, subArgs: string[]): Promise<void>
   }
 
   if (sub === 'create') {
-    runCreate();
+    const projectRoot = resolveSquadDir(cwd);
+    if (!projectRoot) {
+      console.error(`${RED}✗${RESET} No squad found. Run "squad init" first.`);
+      process.exit(1);
+    }
+    await runCreate(projectRoot, subArgs.slice(1));
     return;
   }
 
   // No subcommand — show usage
   console.log(`\n${BOLD}squad identity${RESET} — manage agent GitHub App identity\n`);
-  console.log(`  ${BOLD}squad identity status${RESET}   — show identity configuration`);
-  console.log(`  ${BOLD}squad identity create${RESET}   — setup instructions\n`);
+  console.log(`  ${BOLD}squad identity status${RESET}             — show identity configuration`);
+  console.log(`  ${BOLD}squad identity create --role lead${RESET} — create app for a role`);
+  console.log(`  ${BOLD}squad identity create --all${RESET}       — create apps for all roles`);
+  console.log(`  ${BOLD}squad identity create --simple${RESET}    — create single shared app\n`);
 }
