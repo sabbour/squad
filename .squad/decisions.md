@@ -462,3 +462,31 @@ Full policy documented in `.squad/skills/versioning-policy/SKILL.md`.
 **Implications:**
 - Storage functions take the **project root** path (parent of `.squad/`), not the `.squad/` dir
 - If identity resolution ever needs to go async (e.g., remote key vaults), these will need an async wrapper — but that's a Phase 2 concern
+
+
+---
+
+### 2025-07-25: Token Lifecycle — No External Dependencies
+
+**By:** EECOM
+
+**Context**
+
+Implemented GitHub App JWT generation and installation token exchange for the identity module. Had a choice between using the `jsonwebtoken` npm package or `node:crypto` built-in.
+
+**Decision**
+
+Use `node:crypto` `createSign('RSA-SHA256')` for JWT signing. Use `globalThis.fetch` for GitHub API calls. Zero new npm dependencies.
+
+**Rationale**
+
+- Aligns with "Zero-dependency scaffolding preserved" team decision
+- RS256 JWT generation is ~15 lines with `node:crypto` — a full npm package is unnecessary
+- `fetch` is built-in since Node 18, which is our minimum target
+- Token cache uses a module-level `Map` with 10-minute refresh margin, keeping it simple
+
+**Impact**
+
+- Any agent can call `resolveToken(projectRoot, roleKey)` to get a ready-to-use GitHub token
+- `clearTokenCache()` is exported for test isolation
+- `squad identity create` uses the GitHub App Manifest flow — no PAT needed for setup
