@@ -21,7 +21,7 @@
 import { join } from 'node:path';
 import { existsSync, readdirSync, writeFileSync, mkdirSync } from 'node:fs';
 import { createServer } from 'node:http';
-import { exec } from 'node:child_process';
+import { exec, execSync } from 'node:child_process';
 import { platform } from 'node:os';
 import {
   loadIdentityConfig,
@@ -46,6 +46,19 @@ const DEFAULT_PERMISSIONS = {
   metadata: 'read',
   statuses: 'write',
 } as const;
+
+/** Human-readable descriptions per role for the GitHub App profile. */
+const ROLE_DESCRIPTIONS: Record<string, string> = {
+  lead: 'Squad AI team lead — architecture decisions, code review, and project coordination.',
+  frontend: 'Squad AI frontend developer — UI components, styling, and client-side logic.',
+  backend: 'Squad AI backend developer — APIs, services, data access, and server-side logic.',
+  tester: 'Squad AI tester — test strategy, test cases, quality assurance, and edge cases.',
+  devops: 'Squad AI DevOps engineer — CI/CD, infrastructure, deployment, and automation.',
+  docs: 'Squad AI documentation writer — technical docs, API references, and guides.',
+  security: 'Squad AI security engineer — threat modeling, audits, and secure coding.',
+  data: 'Squad AI data engineer — databases, analytics, data pipelines, and modeling.',
+  shared: 'Squad AI team — shared identity for all AI team member interactions.',
+};
 
 // ============================================================================
 // Helpers
@@ -114,10 +127,19 @@ function openBrowser(url: string): void {
 /**
  * Build the GitHub App manifest JSON for the manifest flow.
  */
-function buildManifest(appName: string, username: string, callbackUrl: string): object {
+function buildManifest(
+  appName: string,
+  username: string,
+  callbackUrl: string,
+  roleSlug?: string,
+): object {
+  const description = ROLE_DESCRIPTIONS[roleSlug ?? 'shared']
+    ?? ROLE_DESCRIPTIONS.shared;
+
   return {
     name: appName,
     url: `https://github.com/${username}`,
+    description,
     hook_attributes: { url: `https://example.com/no-op`, active: false },
     redirect_url: callbackUrl,
     public: false,
@@ -208,6 +230,7 @@ async function waitForManifestCode(
 
 /**
  * Exchange the manifest code for app credentials via GitHub API.
+ * Uses `gh api` CLI (reliable in WSL) with fetch as fallback.
  */
 async function exchangeManifestCode(code: string): Promise<{
   id: number;
@@ -217,6 +240,18 @@ async function exchangeManifestCode(code: string): Promise<{
   client_id: string;
   client_secret: string;
 }> {
+  // Try gh CLI first — it handles auth, proxies, and DNS reliably
+  try {
+    const result = execSync(
+      `gh api -X POST "app-manifests/${code}/conversions"`,
+      { encoding: 'utf-8', timeout: 30_000, stdio: ['pipe', 'pipe', 'pipe'] },
+    );
+    const data = JSON.parse(result);
+    return data;
+  } catch {
+    // gh CLI failed — fall back to fetch
+  }
+
   const url = `https://api.github.com/app-manifests/${code}/conversions`;
   const response = await fetch(url, {
     method: 'POST',
@@ -371,7 +406,7 @@ async function createAppForRole(
   // Build manifest — port is determined when server starts, so use placeholder
   // that gets replaced once we know the port
   const callbackPlaceholder = 'http://localhost:0';
-  const manifest = buildManifest(appName, username, callbackPlaceholder);
+  const manifest = buildManifest(appName, username, callbackPlaceholder, roleSlug ?? (tier === 'shared' ? 'shared' : undefined));
 
   try {
     // Wait for the code from the manifest flow
@@ -402,6 +437,15 @@ async function createAppForRole(
     saveCredentials(projectRoot, key, appData, installationId, tier, roleSlug);
 
     console.log(`${GREEN}✅${RESET} Created ${BOLD}${appName}${RESET} — app ID ${appData.id}`);
+
+    // Avatar upload instructions (GitHub API doesn't support programmatic logo upload)
+    const avatarSlug = roleSlug ?? 'lead';
+    const avatarFile = `docs/proposals/avatars/${avatarSlug}.png`;
+    const appSettingsUrl = `https://github.com/settings/apps/${appData.slug}`;
+    console.log(`\n  ${DIM}📷 To set the avatar, go to:${RESET}`);
+    console.log(`  ${DIM}${appSettingsUrl}${RESET}`);
+    console.log(`  ${DIM}Upload ${BOLD}${avatarFile}${RESET}${DIM} under "Display information → Logo"${RESET}\n`);
+
     return true;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
