@@ -330,6 +330,12 @@ Executed 3 tasks across 2 waves: economy mode (#500, PR #504), node:sqlite fix (
 - `squad identity create` uses GitHub App Manifest flow: local HTTP server + redirect callback. No PAT needed.
 - The CLI `identity create` command dynamically imports `generateAppJWT` from the SDK to avoid circular deps at module scope.
 
+### GH_TOKEN injection into spawn (2025-07-25)
+- `spawnAgent()` now calls `resolveRoleSlug(role)` → `resolveToken(teamRoot, slug)` before `createSession`.
+- Token is injected via `process.env.GH_TOKEN` and restored in a `finally` block (supports both cleanup and previous-value restoration).
+- All identity failures are non-fatal: if `resolveToken` returns `null` or throws, spawn proceeds without injection.
+- 8 tests cover: token set during session, restore after success/failure, null/throw graceful fallback, role-slug mapping, stub mode with identity.
+
 ### Identity module — API design (2025-07-25)
 - Storage functions (`loadIdentityConfig`, `saveAppRegistration`, etc.) are **sync** — identity is read at startup before async work. Uses `node:fs` sync APIs, not `node:fs/promises`.
 - Storage functions take the **project root** (parent of `.squad/`), not the `.squad/` dir itself. They internally prepend `.squad/identity/`.
