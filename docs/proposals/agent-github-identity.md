@@ -123,19 +123,46 @@ squad identity rotate flight
 
 ### Naming Convention
 
-App names must be globally unique on GitHub. Convention:
+App names must be globally unique on GitHub. Squad uses a **two-tier naming scheme** to handle the difference between registering identities for your own repos versus repos you've cloned.
+
+#### Tier 1 — Default (own/maintained repos)
 
 ```
 {agent}-{user}-squad
 ```
 
-This scopes each registration to the agent × user pair. The GitHub username provides a natural namespace that avoids collisions between different Squad users.
+This is the standard registration when you're setting up identities for repos you own or maintain. Because you control the agent roster, names are consistent across your repos — one registration installs on all of them.
 
 Examples: `flight-sabbour-squad`, `eecom-sabbour-squad`, `leela-sabbour-squad`.
 
 The resulting `[bot]` identities are: `flight-sabbour-squad[bot]`, `eecom-sabbour-squad[bot]`, etc.
 
-If the name is still taken, the CLI appends a short hash: `flight-sabbour-squad-a1b2`.
+#### Tier 2 — Repo-qualified (cloned/foreign repos)
+
+```
+{agent}-{user}-{repo}-squad
+```
+
+This applies when you clone someone else's repo that has its own Squad team. The agent names may overlap with names in your own repos, but the charters and projects are entirely different. Reusing `flight-sabbour-squad` for a foreign Flight would be wrong — different project, different identity.
+
+Example: cloning `cool-project` by someone else gives you `flight-sabbour-coolproject-squad`, not `flight-sabbour-squad`.
+
+#### Decision Logic in `squad identity create`
+
+The CLI automatically picks the right tier:
+
+1. Compute default name: `{agent}-{user}-squad`
+2. Check if that app is already registered under your GitHub account (via GitHub API)
+3. **Not registered** → register with the default name ✅
+4. **Registered AND installed on current repo** → reuse, no action needed ✅
+5. **Registered but for a different project** → fall back to `{agent}-{user}-{repo}-squad` with a warning:
+
+```
+⚠️ `flight-sabbour-squad` already exists for a different project.
+   Registering as `flight-sabbour-coolproject-squad` instead.
+```
+
+The short-hash suffix (`flight-sabbour-squad-a1b2`) is reserved as a last resort if the repo-qualified name is also taken.
 
 ### Required Permissions
 
@@ -277,6 +304,9 @@ This means 15 agents = 15 registrations per user. Each can be installed on any n
 | 1 user, 20 agents, 50 repos | 20 | ✅ Fine |
 | 7 users, 15 agents each | 15 per user (105 total) | ✅ Each user has 15 — limit is per-account |
 | 1 user, 100+ agents | 100+ | ❌ Need overflow org |
+| 1 user, 15 agents, 3 own repos (same names) | 15 | ✅ Reused across repos via installations |
+| 1 user, 15 agents + cloned repo with 5 new names | 20 | ✅ 15 own + 5 repo-qualified |
+| 1 user, 15 agents + 3 cloned repos with overlapping names | 15–30 | ✅ Worst case ~30 (15 own + up to 15 repo-qualified) |
 
 The per-user scoping means the 100-app limit is effectively per-user, not per-org. Each Squad user registers their own apps under their own GitHub account.
 
@@ -289,6 +319,8 @@ If a user somehow needs more than 100 agent registrations, they can create "app-
 ## Developer Onboarding
 
 ### The Cloning Story
+
+#### Cloning your own repo (or a repo you maintain)
 
 When a new developer clones a repo with Squad agent identities configured, here's what they get:
 
@@ -303,6 +335,29 @@ When a new developer clones a repo with Squad agent identities configured, here'
 .squad/identity/keys/flight.pem     # Private key — never in version control
 .squad/identity/keys/eecom.pem
 ```
+
+#### Cloning a foreign repo (someone else's project)
+
+This is a distinct scenario. You've cloned `someone-else/cool-project`, which has its own Squad team with a "Flight" agent — but it's a different Flight, with a different charter, for a different project.
+
+Running `squad identity create --all` on this repo should NOT reuse your existing `flight-sabbour-squad` registration. That identity belongs to your Flight, not theirs.
+
+**What the CLI does:**
+
+1. Reads the agent roster from the cloned repo's `.squad/team.md`
+2. For each agent name, runs the [decision logic above](#decision-logic-in-squad-identity-create)
+3. Agents whose names already exist under your account (from your own repos) get repo-qualified names: `flight-sabbour-coolproject-squad`
+4. Agents whose names are new to you get the standard default name
+
+**Result:** The cloned repo gets distinct, scoped bot identities. Your existing identities are untouched.
+
+**Repo-owner model (recommended for teams):** Rather than every contributor registering their own apps for a cloned repo, the recommended pattern is that **only the repo owner registers agent apps** — and their apps are the canonical bot identities for that project. Contributors who clone the repo use `gh` CLI fallback locally. The bot identities are a repo-level resource, not a per-contributor concern.
+
+This means:
+- Repo owner registers `flight-sabbour-squad` (or similar) once
+- Contributors clone and use fallback auth locally
+- CI/CD uses the repo owner's app credentials (stored as repo secrets)
+- Only contributors who need distinct bot identity locally run `squad identity create --all` with automatic repo-qualified naming
 
 ### Behavior Without Keys
 
@@ -423,6 +478,8 @@ Originally considered using the owner's account (via `gh` CLI) for assignment an
 3. **Existing `gh-auth-isolation` skill.** Squad already has a skill for managing multiple GitHub identities via `gh auth`. Should the identity system build on this, or is the App-based approach a clean replacement? Recommendation: they serve different purposes — `gh-auth-isolation` handles human multi-account; `squad identity` handles agent identity. Both coexist.
 
 4. **Sub-identity timeline.** GitHub community is requesting sub-identity support for Apps. If it ships within 6 months, should we wait? **Recommendation: No.** Build the per-app model now. The `SquadGitHubClient` abstraction means migrating to sub-identities later is a backend swap, not a rewrite.
+
+5. **Repo-owner model as the canonical recommendation?** The two-tier naming scheme solves the naming collision problem for contributors who want full local bot identities. But a simpler mental model may be: *bot identities are a repo-level resource, owned by the repo owner*. Contributors just use fallback. Should the docs frame this as the default recommendation and treat contributor-self-registration as an advanced opt-in? **Recommendation: Yes.** The CI-only model (owner registers apps, contributors use fallback) should be the recommended starting point. Self-registration with repo-qualified names is available for contributors who explicitly need it.
 
 ---
 
