@@ -2,8 +2,8 @@
 
 **Author:** Flight (Lead)  
 **Date:** 2026-03-27  
-**Revised:** 2026-03-28  
-**Status:** Proposal (Revised — Shared App Model)  
+**Revised:** 2026-03-29  
+**Status:** Proposal (Revised — Three-Tier Identity Model, Per-Role Recommended)  
 
 ---
 
@@ -23,7 +23,11 @@ The current model was fine for prototyping. It doesn't scale past a handful of a
 
 ---
 
-## Proposed Solution: One Shared GitHub App Per User
+## Proposed Solution: Three-Tier Identity Model
+
+Squad supports three identity models, each progressively richer. **Tier 2 (per-role apps) is the recommended default** — it strikes the best balance between visual identity and operational simplicity.
+
+### Tier 1: Shared App (Simplest — One App for All)
 
 Each Squad user registers a single [GitHub App](https://docs.github.com/en/apps/overview) named `{user}-squad` (e.g., `sabbour-squad`). All agent operations route through this one app. Agent attribution is carried in structured comment bodies and commit messages — not in the GitHub App identity itself.
 
@@ -35,66 +39,164 @@ When any agent comments, it appears as `sabbour-squad[bot]` — clearly a bot, c
 Architecture review complete. The proposed auth module follows our established patterns. Approved.
 ```
 
-### Why a Shared App (not per-agent apps, not machine users)
+**Pros:**
+- One registration, one key, one install per repo
+- Simplest bootstrap (one browser confirmation)
+- Zero naming concerns — `{user}-squad` always fits the 34-char limit
+- No cross-repo collisions
 
-The original version of this proposal recommended one GitHub App per agent. Iterative design review revealed cascading problems with that model:
+**Cons:**
+- All agents look the same on GitHub — you have to read the comment body
+- No per-role filtering or avatars
+- Can't tell at a glance what KIND of agent posted
 
-1. **34-character GitHub App name limit.** GitHub App names are capped at 34 characters and must be globally unique. The per-agent pattern `{agent}-{user}-squad` works for short names but breaks with longer agent or user names. The repo-qualified fallback `{agent}-{user}-{repo}-squad` exceeds the limit almost immediately.
+**Best for:** Users who want bot identity with absolute minimum setup.
 
-2. **Cross-repo collisions.** When you clone someone else's repo, their "Flight" ≠ your "Flight" — but both map to `flight-sabbour-squad`. The original proposal required two-tier naming logic, collision detection, and repo-qualified disambiguation to handle this. All of which goes away with a shared app.
+### Tier 2: Per-Role Apps (Recommended — One App per Role)
 
-3. **Registration scaling.** GitHub's hard cap of 100 App registrations per account gets tight when you multiply agents × repos. With a shared app: always 1 registration, regardless of agent count or repo count.
+Instead of one app for everything or one app per agent name, create **one app per role per user**. Roles are a small, stable set (~8) drawn from Squad's standard role taxonomy. They don't change across repos.
 
-4. **Credential explosion.** N agents = N private keys to manage, rotate, and secure. One app = one key.
+**Naming convention:** `{user}-squad-{role}` — e.g., `sabbour-squad-lead`, `sabbour-squad-backend`, `sabbour-squad-tester`.
 
-5. **Bootstrap friction.** `squad identity create --all` with per-agent apps requires N sequential browser confirmations. With a shared app: one click, done.
+When Flight (Lead on repo A) and Leela (Lead on repo B) both comment, they appear as `sabbour-squad-lead[bot]`. EECOM (Core Dev on repo A) and Bender (Backend on repo B) both post as `sabbour-squad-backend[bot]`. The agent name goes in the comment body:
 
-6. **Naming logic complexity.** Two-tier naming, collision detection, short-hash fallbacks, repo-qualified suffixes — all this machinery exists solely to work around per-agent naming constraints. A shared app eliminates the entire category.
+```markdown
+🏗️ **Flight** (Lead)
+
+Architecture review complete. The proposed auth module follows our established patterns. Approved.
+```
+
+#### Standard Role Slugs (Bounded Set)
+
+| Role slug | Maps to | Emoji |
+|-----------|---------|-------|
+| `lead` | Lead, Architect, Tech Lead | 🏗️ |
+| `frontend` | Frontend, UI, Design | ⚛️ |
+| `backend` | Backend, API, Server, Core Dev | 🔧 |
+| `tester` | Tester, QA, Quality | 🧪 |
+| `devops` | DevOps, Infra, Platform, CI/CD | ⚙️ |
+| `docs` | DevRel, Writer, Documentation | 📝 |
+| `security` | Security, Auth, Compliance | 🔒 |
+| `data` | Data, Database, Analytics | 📊 |
+
+That's 8 roles max = 8 app registrations per user, regardless of how many agents or repos you have. Internal-only agents (like Scribe and Ralph) don't get apps — they never post to GitHub as themselves.
+
+#### How Squad Maps Agents to Roles
+
+At comment time, Squad reads the team roster from `team.md` and maps each agent to its role slug. The role slug determines which app identity to use:
+
+1. Agent requests a GitHub operation (e.g., comment on an issue).
+2. Squad looks up the agent's role in the team roster.
+3. Squad maps the role to its canonical role slug (e.g., "Core Dev" → `backend`).
+4. Squad authenticates as the corresponding role app (e.g., `sabbour-squad-backend`).
+5. The comment body includes the agent's actual name: `🔧 **EECOM** (Core Dev)`.
+
+This means you can always tell at a glance:
+- **From the bot name:** What kind of work this is (backend, testing, security...).
+- **From the comment body:** Which specific agent did it.
+
+#### Per-Role Avatar Support
+
+Each role app gets its own GitHub avatar. This means every role has a distinct visual identity in the GitHub UI — the lead has a different avatar from the tester, which is different from the backend developer. Avatar generation (e.g., role-specific icons) is a planned feature for `squad identity create`.
+
+**Pros:**
+- Bot name immediately shows what KIND of agent spoke
+- Per-role avatars give strong visual differentiation
+- Only ~8 apps total (stable, doesn't grow with agent count)
+- No naming collisions — roles are universal
+- 34-char limit is safe (`sabbour-squad-backend` = 22 chars)
+- Same role apps work across all repos — zero per-repo setup
+- Credential count is bounded (~8 keys)
+
+**Cons:**
+- 8 browser confirmations at bootstrap (one-time)
+- 8 keys to manage (but bounded, not unbounded)
+- Can't distinguish between two agents with the same role from GitHub UI alone
+
+**Best for:** Most users. Gives meaningful visual identity without operational complexity.
+
+### Tier 3: Per-Agent Apps (Advanced — One App per Agent)
+
+For users who specifically want per-agent GitHub filtering or per-agent avatars, each agent gets its own app: `{agent}-{user}-squad` (e.g., `flight-sabbour-squad`).
+
+**Pros:**
+- Distinct `[bot]` identity per agent
+- Per-agent avatar
+- Per-agent GitHub notification filtering
+- Per-agent git blame attribution
+
+**Cons:**
+- **34-character name limit.** `{agent}-{user}-squad` works for short names but breaks with longer ones. Repo-qualified fallback (`{agent}-{user}-{repo}-squad`) exceeds the limit almost immediately.
+- **Cross-repo collisions.** When you clone someone else's repo, their "Flight" ≠ your "Flight" — but both map to `flight-sabbour-squad`. Requires collision detection and repo-qualified disambiguation.
+- **Credential explosion.** N agents = N private keys to manage, rotate, and share.
+- **Bootstrap friction.** Each app requires a separate browser confirmation. 15 agents = 15 confirmations.
+- **Registration scaling.** 15 agents = 15 of your 100 app quota. With cloned repos, this grows further.
+- **Naming logic complexity.** Two-tier naming, collision detection, short-hash fallbacks — all machinery that exists solely to work around per-agent naming constraints.
+
+**Best for:** Users who need per-agent GitHub notification filtering and understand the trade-offs.
+
+#### Naming Scheme (Per-Agent Mode)
+
+Per-agent mode uses a two-tier naming scheme:
+
+**Primary:** `{agent}-{user}-squad` (e.g., `flight-sabbour-squad`)
+
+**Fallback:** `{agent}-{user}-{repo}-squad` (used when the primary name is already registered for a different project)
+
+The CLI automatically detects collisions and falls back with a warning:
+
+```
+⚠️ `flight-sabbour-squad` already exists for a different project.
+   Registering as `flight-sabbour-coolproject-squad` instead.
+```
 
 ### Approach Comparison
 
-| Approach | Identity | Cost | Credential scope | Assignment/Review |
-|----------|----------|------|-------------------|-------------------|
-| **Shared app per user** ✅ | One `[bot]` for all agents | Free | One credential set | Via Squad routing (labels) |
-| One app per agent | Distinct `[bot]` per agent | Free | Isolated per agent | Via Squad routing (labels) |
-| Machine users | Distinct human-like | Paid seat per agent | Isolated | ✅ native GitHub UI |
-| Personal account (status quo) | Owner's account | Free | Shared, owner-coupled | ✅ native GitHub UI |
+| Approach | Identity | App count | Credential scope | Best for |
+|----------|----------|-----------|-------------------|----------|
+| **Tier 1: Shared app** | One `[bot]` for all agents | 1 | One credential set | Minimal setup |
+| **Tier 2: Per-role apps** ✅ | Per-role `[bot]` | ~8 (stable) | ~8 credential sets | Most users |
+| **Tier 3: Per-agent apps** | Distinct `[bot]` per agent | N (grows) | N credential sets | Advanced filtering |
+| Machine users (rejected) | Distinct human-like | N (paid seats) | Isolated | N/A |
+| Personal account (status quo) | Owner's account | 0 | Shared, owner-coupled | N/A |
 
-### Trade-off Matrix: Shared App vs. Per-Agent App
+### Trade-off Matrix
 
-| Goal | Per-agent app | Shared app |
-|------|--------------|------------|
-| Not talking to yourself | ✅ | ✅ |
-| Bot badge on GitHub | ✅ | ✅ |
-| Per-agent GitHub filtering | ✅ | ❌ (all from one bot) |
-| Per-agent avatar | ✅ | ❌ (one avatar) |
-| Per-agent git blame | ✅ | ❌ (one committer, agent in message) |
-| 34-char name limit | ⚠️ Tight | ✅ Trivial |
-| Cross-repo reuse | ⚠️ Complex | ✅ One install per repo |
-| Foreign repo cloning | ⚠️ Collisions | ✅ No collisions |
-| Scaling (100 app cap) | ⚠️ Agent count dependent | ✅ Always 1 |
-| Bootstrap UX | ⚠️ N browser confirmations | ✅ One click |
-| Credential management | ⚠️ N keys | ✅ One key |
-| Operational complexity | 🔴 High | 🟢 Low |
+| Concern | Tier 1: Shared (1 app) | Tier 2: Per-role (~8 apps) | Tier 3: Per-agent (N apps) |
+|---------|----------------------|--------------------------|--------------------------|
+| Not talking to yourself | ✅ | ✅ | ✅ |
+| Bot badge on GitHub | ✅ | ✅ | ✅ |
+| Can tell WHAT kind of agent spoke | ❌ Read body | ✅ Bot name shows role | ✅ Bot name shows agent |
+| Per-agent GitHub filtering | ❌ All from one bot | ⚠️ Per-role filtering | ✅ Per-agent filtering |
+| Custom avatar | ❌ One avatar | ✅ Per-role avatar | ✅ Per-agent avatar |
+| Per-agent git blame | ❌ One committer | ⚠️ Per-role committer | ✅ Per-agent committer |
+| 34-char name limit | ✅ Trivial | ✅ Safe (22 chars typical) | ⚠️ Tight |
+| Cross-repo reuse | ✅ Automatic | ✅ Same roles everywhere | ⚠️ Complex |
+| Foreign repo cloning | ✅ No collisions | ✅ No collisions | ⚠️ Collisions |
+| Scaling (100 app cap) | ✅ Always 1 | ✅ Always ~8 | ⚠️ Agent count dependent |
+| Bootstrap UX | ✅ 1 click | ✅ ~8 clicks (one-time) | ⚠️ N clicks |
+| Credential management | ✅ 1 key | ✅ ~8 keys (bounded) | ⚠️ N keys |
+| Operational complexity | 🟢 Low | 🟢 Low-medium | 🔴 High |
+| Name collision risk | None | None (roles are universal) | High (names differ per repo) |
 
-The shared app trades per-agent GitHub-native filtering and per-agent avatars for dramatically lower operational complexity. Since agent identity is carried in comment and commit bodies — which is what people actually read — the loss of per-agent GitHub filtering is cosmetic, not functional.
+The per-role model (Tier 2) hits the sweet spot: you get meaningful visual identity from bot names and avatars, without the unbounded complexity of per-agent apps. The ~8 role slugs are universal across every repo — no collision logic, no naming gymnastics.
 
 ---
 
 ## What Works Cleanly
 
-These GitHub App capabilities map directly to Squad agent operations under the shared app model:
+These GitHub App capabilities map directly to Squad agent operations under all three tiers:
 
 | Capability | How it works |
 |------------|-------------|
-| **Issue/PR comments** | App posts as `{user}-squad[bot]`. Agent identity in structured comment body. |
-| **Commits** | Author: `{user}-squad[bot] <12345+{user}-squad[bot]@users.noreply.github.com>`. Agent name in commit message prefix. |
-| **Branch operations** | Create, delete, push — all under the shared app's identity. |
+| **Issue/PR comments** | App posts as `{user}-squad[bot]` (Tier 1) or `{user}-squad-{role}[bot]` (Tier 2) or `{agent}-{user}-squad[bot]` (Tier 3). Agent identity in structured comment body. |
+| **Commits** | Author: `{app-name}[bot] <id+{app-name}[bot]@users.noreply.github.com>`. Agent name in commit message prefix. |
+| **Branch operations** | Create, delete, push — all under the app's identity. |
 | **Open/merge PRs** | App opens PRs as itself. Appears as a bot contributor. |
 | **Labels** | Add/remove labels (preserves `squad:agent` routing pattern). |
 | **Reactions** | Agents can react to comments (useful for acknowledgment patterns). |
 | **Status checks** | Post commit statuses and check runs. |
-| **Audit log** | Every action attributed to the shared app in org audit logs. |
+| **Audit log** | Every action attributed to the app in org audit logs. Per-role (Tier 2) gives role-level audit granularity. |
 
 ---
 
@@ -136,7 +238,13 @@ Apps can't join GitHub Teams. Squad uses labels and its own routing, not GitHub 
 
 ## Comment Attribution Format
 
-Since all comments come from one bot identity (`{user}-squad[bot]`), the comment body carries the agent identity. Squad formats every agent comment with a structured header:
+Regardless of tier, the comment body always carries the agent's name and role. The bot account name varies by tier:
+
+| Tier | Bot name | Comment body |
+|------|----------|-------------|
+| Tier 1 | `sabbour-squad[bot]` | `🏗️ **Flight** (Lead)` |
+| Tier 2 | `sabbour-squad-lead[bot]` | `🏗️ **Flight** (Lead)` |
+| Tier 3 | `flight-sabbour-squad[bot]` | `🏗️ **Flight** (Lead)` |
 
 ### Standard Format
 
@@ -146,23 +254,26 @@ Since all comments come from one bot identity (`{user}-squad[bot]`), the comment
 Architecture review complete. The proposed auth module follows our established patterns. Approved.
 ```
 
-The emoji + bold agent name + role in parentheses gives immediate visual identification. The actual content follows after a blank line.
+The emoji + bold agent name + role in parentheses gives immediate visual identification. The actual content follows after a blank line. The emoji matches the role slug table — this is consistent across all tiers.
 
 ### Commit Message Format
 
-Commits use the shared app as the Git author, with the agent name as a commit message prefix:
+Commits use the app as the Git author, with the agent name as a commit message prefix:
 
 ```
 [Flight] refactor: extract auth module
 ```
 
-Git author: `sabbour-squad[bot] <12345+sabbour-squad[bot]@users.noreply.github.com>`
+Git author varies by tier:
+- **Tier 1:** `sabbour-squad[bot] <12345+sabbour-squad[bot]@users.noreply.github.com>`
+- **Tier 2:** `sabbour-squad-lead[bot] <12345+sabbour-squad-lead[bot]@users.noreply.github.com>`
+- **Tier 3:** `flight-sabbour-squad[bot] <12345+flight-sabbour-squad[bot]@users.noreply.github.com>`
 
-This preserves machine-parseable agent attribution in git history while keeping one committer identity.
+This preserves machine-parseable agent attribution in git history. Tier 2 gives role-level grouping in git blame — all lead operations cluster under one committer, all backend operations under another.
 
 ### Why This Works
 
-People read comment bodies, not commenter hover cards. The agent name at the top of every comment is more visible than a GitHub username — it's bold, emoji-prefixed, and includes the role. For git blame, `[AgentName]` prefixes are greppable and filter-friendly.
+People read comment bodies, not commenter hover cards. The agent name at the top of every comment is more visible than a GitHub username — it's bold, emoji-prefixed, and includes the role. For git blame, `[AgentName]` prefixes are greppable and filter-friendly. Tier 2 adds the bonus that the committer name itself is meaningful — you can filter git blame by role.
 
 ---
 
@@ -172,22 +283,27 @@ People read comment bodies, not commenter hover cards. The agent name at the top
 
 GitHub Apps cannot be created fully headlessly. The [manifest flow](https://docs.github.com/en/apps/sharing-github-apps/registering-a-github-app-from-a-manifest) is semi-automated:
 
-1. Squad CLI generates a JSON manifest with the app name (`{user}-squad`), required permissions, and events.
+1. Squad CLI generates a JSON manifest with the app name, required permissions, and events.
 2. CLI opens the user's browser to `https://github.com/settings/apps/new?manifest=<encoded>`.
-3. User confirms the app name on GitHub (one click).
+3. User confirms the app name on GitHub (one click per app).
 4. GitHub redirects back with a temporary code.
 5. CLI exchanges the code for credentials (app ID, private key, webhook secret).
 6. Credentials are stored locally (see Credential Management below).
 
-One registration. One browser confirmation. Done.
-
 ### CLI Interface
 
 ```bash
-# Create the shared Squad identity
+# Tier 2: Create per-role identity apps (default — recommended)
 squad identity create
 
-# Check identity status
+# Tier 1: Create one shared identity app
+squad identity create --simple
+
+# Tier 3: Create per-agent identity apps
+squad identity create --per-agent          # For a specific agent
+squad identity create --per-agent --all    # For all agents in roster
+
+# Check identity status (works for all tiers)
 squad identity status
 
 # Rotate credentials
@@ -197,19 +313,39 @@ squad identity rotate
 squad identity install <owner/repo>
 ```
 
-No `--all` flag needed. No per-agent loop. One command creates one app.
+#### Tier 2 Bootstrap Flow (Default)
 
-### Naming Convention
+`squad identity create` with no flags creates per-role apps. The CLI:
 
-The shared app uses a simple, predictable name:
+1. Reads the team roster from `team.md`.
+2. Identifies all unique role slugs used by agents in the roster.
+3. Creates apps in sequence: `{user}-squad-lead`, `{user}-squad-backend`, etc.
+4. Each app requires one browser confirmation.
+5. All credentials are stored under `.squad/identity/`.
 
 ```
-{user}-squad
+$ squad identity create
+  Creating per-role identity apps...
+  
+  🏗️ sabbour-squad-lead      ✅ Created
+  🔧 sabbour-squad-backend   ✅ Created
+  🧪 sabbour-squad-tester    ✅ Created
+  ⚙️ sabbour-squad-devops    ✅ Created
+  📝 sabbour-squad-docs      ✅ Created
+  
+  5 role apps created. Installed on bradygaster/squad.
+  Agents will post as sabbour-squad-{role}[bot].
 ```
 
-Examples: `sabbour-squad`, `octocat-squad`, `jdoe-squad`.
+Only the roles actually used by agents in the current roster are created. If you later add an agent with a new role, `squad identity create` detects missing role apps and creates only the new ones.
 
-The resulting `[bot]` identity: `sabbour-squad[bot]`.
+### Naming Conventions
+
+| Tier | Pattern | Example | Length |
+|------|---------|---------|--------|
+| Tier 1 | `{user}-squad` | `sabbour-squad` | 14 |
+| Tier 2 | `{user}-squad-{role}` | `sabbour-squad-backend` | 22 |
+| Tier 3 | `{agent}-{user}-squad` | `flight-sabbour-squad` | 21 |
 
 #### GitHub App Name Constraints
 
@@ -220,13 +356,13 @@ GitHub App names have the following restrictions (verified empirically):
 - **Allowed characters:** alphanumeric, hyphens, spaces (rendered as hyphens in slugs)
 - **Reserved prefixes:** `github`, `octocat` (and others) cannot be used
 
-With the `{user}-squad` pattern, the name is always `len(username) + 6` characters. GitHub usernames max out at 39 characters, but in practice the `{user}-squad` pattern stays well under 34 for any real username. If a username exceeds 28 characters, the CLI can truncate with a suffix: `{user-truncated}-squad`.
+With the `{user}-squad` pattern (Tier 1), the name is always `len(username) + 6` characters. For Tier 2, the longest role slug is `security` (8 chars), giving `len(username) + 15`. Any username ≤ 19 chars (the vast majority) stays under 34. The CLI validates at creation time and warns if a username is too long.
 
-This is a non-issue in practice — the 34-char limit only becomes a problem with per-agent naming where `{agent}-{user}-{repo}-squad` compounds three variable-length segments.
+The 34-char limit only becomes a real concern with Tier 3 per-agent naming where `{agent}-{user}-{repo}-squad` compounds three variable-length segments.
 
 ### Required Permissions
 
-Minimal permission set for Squad operations:
+Minimal permission set for Squad operations (same for all tiers):
 
 ```json
 {
@@ -246,7 +382,7 @@ One permission set covers all agents. No need to scope per-agent — Squad's own
 
 ## Credential Management
 
-### Storage
+### Tier 1: Shared App Storage
 
 ```
 .squad/
@@ -257,11 +393,53 @@ One permission set covers all agents. No need to scope per-agent — Squad's own
       squad.pem         # Private key
 ```
 
-- **`apps/squad.json`** — Committed. Contains non-secret metadata (app ID, installation ID, slug). Other team members need this to know the app exists.
-- **`keys/squad.pem`** — Gitignored. Private key never enters version control. Period.
-- **`.gitignore`** entry: `.squad/identity/keys/`
+One JSON file. One PEM file.
 
-One JSON file. One PEM file. No per-agent proliferation.
+### Tier 2: Per-Role App Storage (Recommended)
+
+```
+.squad/
+  identity/
+    apps/
+      lead.json         # { appId, installationId, appSlug }
+      backend.json
+      tester.json
+      devops.json
+      docs.json
+    keys/               # ⚠️ GITIGNORED
+      lead.pem
+      backend.pem
+      tester.pem
+      devops.pem
+      docs.pem
+```
+
+One JSON + one PEM per role. The number of files is bounded by the role count (~8 max), regardless of how many agents or repos you have.
+
+### Tier 3: Per-Agent App Storage
+
+```
+.squad/
+  identity/
+    apps/
+      flight.json       # { appId, installationId, appSlug }
+      leela.json
+      fry.json
+      ...
+    keys/               # ⚠️ GITIGNORED
+      flight.pem
+      leela.pem
+      fry.pem
+      ...
+```
+
+One JSON + one PEM per agent. File count grows with agent count.
+
+### Common Storage Rules
+
+- **`apps/*.json`** — Committed. Contains non-secret metadata (app ID, installation ID, slug). Other team members need this to know the apps exist.
+- **`keys/*.pem`** — Gitignored. Private keys never enter version control. Period.
+- **`.gitignore`** entry: `.squad/identity/keys/`
 
 ### Token Lifecycle
 
@@ -270,19 +448,39 @@ GitHub App authentication is a two-step process:
 1. **JWT generation:** Sign a JWT using the app's private key. Valid for 10 minutes.
 2. **Installation token exchange:** Exchange the JWT for an installation access token. Valid for 1 hour.
 
-Squad caches installation tokens and refreshes them proactively (at 50 minutes, not at expiry). Token refresh is transparent — agents never deal with auth directly.
+Squad caches installation tokens and refreshes them proactively (at 50 minutes, not at expiry). Token refresh is transparent — agents never deal with auth directly. For Tier 2, Squad caches one token per role app and selects the right one based on the agent's role at operation time.
 
 ### Environment Variable Override
 
 For CI/CD or environments where PEM files aren't practical:
 
+**Tier 1:**
 ```bash
 SQUAD_APP_ID=12345
 SQUAD_PRIVATE_KEY=base64-encoded-pem
 SQUAD_INSTALLATION_ID=67890
 ```
 
-Three environment variables total — not three per agent. This enables GitHub Actions workflows where the squad identity is stored as repository secrets.
+**Tier 2:**
+```bash
+SQUAD_LEAD_APP_ID=12345
+SQUAD_LEAD_PRIVATE_KEY=base64-encoded-pem
+SQUAD_LEAD_INSTALLATION_ID=67890
+SQUAD_BACKEND_APP_ID=12346
+SQUAD_BACKEND_PRIVATE_KEY=base64-encoded-pem
+SQUAD_BACKEND_INSTALLATION_ID=67891
+# ... one set per role
+```
+
+**Tier 3:**
+```bash
+SQUAD_FLIGHT_APP_ID=12345
+SQUAD_FLIGHT_PRIVATE_KEY=base64-encoded-pem
+SQUAD_FLIGHT_INSTALLATION_ID=67890
+# ... one set per agent
+```
+
+For Tier 2 in CI/CD, the ~8 variable sets are manageable as repository secrets. This is bounded and predictable — unlike Tier 3 where variable count grows with agent count.
 
 ---
 
@@ -290,7 +488,7 @@ Three environment variables total — not three per agent. This enables GitHub A
 
 ### Identity-Aware GitHub Client
 
-The core change is a GitHub API client that routes all agent operations through the shared app identity:
+The core change is a GitHub API client that routes agent operations through the appropriate app identity based on the configured tier:
 
 ```typescript
 interface SquadIdentity {
@@ -299,17 +497,49 @@ interface SquadIdentity {
   privateKey: string;
 }
 
+type IdentityTier = 'shared' | 'per-role' | 'per-agent';
+
 class SquadGitHubClient {
-  // Get an authenticated Octokit instance for Squad operations
-  async getClient(): Promise<Octokit> {
-    const identity = await this.loadIdentity();
+  private tier: IdentityTier;
+  
+  // Get an authenticated Octokit instance for a specific agent operation
+  async getClient(agentName: string, agentRole: string): Promise<Octokit> {
+    const identity = await this.resolveIdentity(agentName, agentRole);
     const token = await this.getInstallationToken(identity);
     return new Octokit({ auth: token });
   }
 
+  // Resolve which app identity to use based on tier
+  private async resolveIdentity(
+    agentName: string, agentRole: string
+  ): Promise<SquadIdentity> {
+    switch (this.tier) {
+      case 'shared':    return this.loadIdentity('squad');
+      case 'per-role':  return this.loadIdentity(this.roleSlug(agentRole));
+      case 'per-agent': return this.loadIdentity(agentName.toLowerCase());
+    }
+  }
+
+  // Map a role name to its canonical slug
+  private roleSlug(role: string): string {
+    const mapping: Record<string, string> = {
+      'Lead': 'lead', 'Architect': 'lead', 'Tech Lead': 'lead',
+      'Frontend': 'frontend', 'UI': 'frontend', 'Design': 'frontend',
+      'Backend': 'backend', 'API': 'backend', 'Core Dev': 'backend',
+      'Tester': 'tester', 'QA': 'tester', 'Quality': 'tester',
+      'DevOps': 'devops', 'Infra': 'devops', 'Platform': 'devops',
+      'DevRel': 'docs', 'Writer': 'docs', 'Documentation': 'docs',
+      'Security': 'security', 'Auth': 'security', 'Compliance': 'security',
+      'Data': 'data', 'Database': 'data', 'Analytics': 'data',
+    };
+    return mapping[role] ?? 'lead';
+  }
+
   // Post a comment with agent attribution in the body
-  async commentAs(agentName: string, agentRole: string, opts: CommentOpts): Promise<void> {
-    const octokit = await this.getClient();
+  async commentAs(
+    agentName: string, agentRole: string, opts: CommentOpts
+  ): Promise<void> {
+    const octokit = await this.getClient(agentName, agentRole);
     const body = this.formatAgentComment(agentName, agentRole, opts.body);
     await octokit.issues.createComment({
       owner: opts.owner,
@@ -319,22 +549,26 @@ class SquadGitHubClient {
     });
   }
 
-  private formatAgentComment(name: string, role: string, content: string): string {
-    const emoji = this.agentEmoji(name);
+  private formatAgentComment(
+    name: string, role: string, content: string
+  ): string {
+    const emoji = this.roleEmoji(role);
     return `${emoji} **${name}** (${role})\n\n${content}`;
   }
 }
 
-// Usage in agent code
+// Usage in agent code — same API regardless of tier
 const gh = squad.github();
 await gh.commentAs('Flight', 'Lead', {
   owner, repo, issueNumber,
   body: 'Architecture review complete. Approved.'
 });
-// Comment appears as sabbour-squad[bot] with Flight attribution in body
+// Tier 1: Comment appears as sabbour-squad[bot]
+// Tier 2: Comment appears as sabbour-squad-lead[bot]
+// Tier 3: Comment appears as flight-sabbour-squad[bot]
 ```
 
-The `commentAs()` method abstracts agent attribution — agent code just provides the content. The client handles formatting, identity, and authentication transparently.
+The `commentAs()` method abstracts both agent attribution and tier-specific identity resolution. Agent code provides the content; the client handles everything else. Switching tiers requires zero agent code changes.
 
 ### Fallback Behavior
 
@@ -354,7 +588,7 @@ Today Squad uses the `gh` CLI for GitHub operations. The identity system would i
 
 ## Developer Onboarding
 
-The shared app model makes onboarding dramatically simpler.
+The per-role app model (Tier 2) keeps onboarding simple while providing meaningful identity.
 
 ### Clone → Run → Done
 
@@ -366,25 +600,30 @@ The shared app model makes onboarding dramatically simpler.
 
 ```bash
 $ squad identity create
-  ✅ Created GitHub App: sabbour-squad
-  ✅ App installed on bradygaster/squad
-  ✅ Credentials stored in .squad/identity/
+  Creating per-role identity apps...
   
-  All agents will now post as sabbour-squad[bot].
+  🏗️ sabbour-squad-lead      ✅ Created
+  🔧 sabbour-squad-backend   ✅ Created
+  🧪 sabbour-squad-tester    ✅ Created
+  
+  3 role apps created. Installed on bradygaster/squad.
+  Agents will post as sabbour-squad-{role}[bot].
 ```
 
-One browser confirmation. One app. Done.
+~8 browser confirmations, but it's a one-time setup. After that, new agents automatically use the existing role apps — no additional registration needed.
 
 ### Installing on Additional Repos
 
-Your `sabbour-squad` app can be installed on any repo:
+All your role apps can be installed on any repo in one command:
 
 ```bash
 $ squad identity install someone-else/cool-project
-  ✅ sabbour-squad installed on someone-else/cool-project
+  ✅ sabbour-squad-lead installed on someone-else/cool-project
+  ✅ sabbour-squad-backend installed on someone-else/cool-project
+  ✅ sabbour-squad-tester installed on someone-else/cool-project
 ```
 
-No naming collisions. No repo-qualified fallbacks. No two-tier naming logic. Your `sabbour-squad` is always yours, regardless of which repo you're working on.
+No naming collisions. No repo-qualified fallbacks. Your role apps are the same everywhere — `sabbour-squad-lead` in repo A is the same app as `sabbour-squad-lead` in repo B.
 
 ### Behavior Without Identity
 
@@ -394,10 +633,15 @@ The `squad identity status` command makes this visible:
 
 ```
 $ squad identity status
-  Identity:  sabbour-squad[bot]
-  Status:    ✅ Active
+  Tier:      Per-role (Tier 2)
+  
+  🏗️ sabbour-squad-lead      ✅ Active
+  🔧 sabbour-squad-backend   ✅ Active
+  🧪 sabbour-squad-tester    ✅ Active
+  ⚙️ sabbour-squad-devops    ⚠️ Not created (no agents use this role)
+  📝 sabbour-squad-docs      ⚠️ Not created (no agents use this role)
+  
   Installed: bradygaster/squad, someone-else/cool-project
-  Agents:    All agents route through this identity
 ```
 
 Or, without identity:
@@ -413,26 +657,24 @@ $ squad identity status
 
 Two paths:
 
-1. **Transfer the key.** Copy `squad.pem` from a secure vault (1Password, Azure Key Vault, etc.) to `.squad/identity/keys/`. The `apps/squad.json` is already committed — only the key needs sharing.
+1. **Transfer the keys.** Copy the PEM files from a secure vault (1Password, Azure Key Vault, etc.) to `.squad/identity/keys/`. The `apps/*.json` files are already committed — only the keys need sharing.
 
-2. **CI-only model.** Only CI/CD has the key (stored as one repo secret). Developers use `gh` CLI fallback locally. Bot identity only appears on CI-generated comments and commits. Simplest to manage — the recommended starting point for most teams.
+2. **CI-only model.** Only CI/CD has the keys (stored as repo secrets). Developers use `gh` CLI fallback locally. Bot identity only appears on CI-generated comments and commits. For Tier 2, this means ~8 secret variables per repo — manageable and bounded.
 
 ---
 
 ## Scaling & Limits
 
-### Why Scaling Is a Non-Issue
+### Why Scaling Varies by Tier
 
-With the shared app model, every user has exactly **1 app registration** regardless of how many agents or repos they have. GitHub's 100-app-per-account limit is irrelevant.
+| Scenario | Tier 1 (Shared) | Tier 2 (Per-Role) | Tier 3 (Per-Agent) |
+|----------|----------------|-------------------|-------------------|
+| 1 user, 5 agents, 1 repo | 1 reg | ~5 reg | 5 reg |
+| 1 user, 50 agents, 100 repos | 1 reg | ~8 reg (capped) | 50 reg |
+| 1 user, 200 agents, 500 repos | 1 reg | ~8 reg (capped) | ⚠️ Over 100-app limit |
+| 10 users, any agents, any repos | 1 per user | ~8 per user | N per user |
 
-| Scenario | Registrations | Status |
-|----------|--------------|--------|
-| 1 user, 5 agents, 1 repo | 1 | ✅ |
-| 1 user, 50 agents, 100 repos | 1 | ✅ |
-| 1 user, 200 agents, 500 repos | 1 | ✅ |
-| 10 users, any agents, any repos | 1 per user | ✅ |
-
-The registration-vs-installation distinction still applies — a registered app can be installed on unlimited repositories — but you never need to think about it because you'll never approach the limit.
+Tier 2's key property: the registration count is **bounded by the number of roles, not the number of agents or repos**. Since the role set is fixed at ~8, you can never hit the 100-app limit from role apps alone — leaving plenty of headroom for other GitHub Apps.
 
 ### GitHub App Limits Reference
 
@@ -442,59 +684,15 @@ For context, GitHub imposes these limits on App registrations:
 - **No limit on installations** — a registered app can be installed on unlimited repos
 - **34-character App name limit** — must be globally unique
 
-With the shared model, only the 34-char name limit is even theoretically relevant, and `{user}-squad` stays well under it.
+With the per-role model (Tier 2), only the 34-char name limit is even theoretically relevant, and `{user}-squad-{role}` stays well under it for typical usernames.
+
+| Tier | Registrations used | Headroom (of 100) | 34-char risk |
+|------|-------------------|-------------------|-------------|
+| Tier 1 | 1 | 99 | None |
+| Tier 2 | ~8 | ~92 | None (22 chars typical) |
+| Tier 3 | N (grows) | Depends | Moderate |
 
 ---
-
-## Advanced Mode: Per-Agent Apps
-
-For users who specifically want per-agent GitHub filtering or per-agent avatars, the per-agent app model is available as an advanced configuration.
-
-### When Per-Agent Apps Make Sense
-
-- You want to filter GitHub notifications by specific agent
-- You want distinct avatars for each agent
-- You want per-agent git blame attribution
-- You're comfortable managing N credentials and N app registrations
-
-### How It Works
-
-Each agent gets its own app: `{agent}-{user}-squad` (e.g., `flight-sabbour-squad`).
-
-```bash
-# Advanced: create per-agent identity
-squad identity create --per-agent flight
-
-# Advanced: create per-agent identities for all agents
-squad identity create --per-agent --all
-```
-
-### Complexity Warnings
-
-Per-agent apps inherit all the complexity the shared model avoids:
-
-- **34-character name limit.** `{agent}-{user}-squad` works for short names but may exceed the limit. Repo-qualified names (`{agent}-{user}-{repo}-squad`) will almost certainly exceed it.
-- **Cross-repo collisions.** If you clone a foreign repo whose agent names overlap yours, the CLI must fall back to repo-qualified naming with collision detection.
-- **Credential management.** N agents = N private keys to manage, rotate, and share.
-- **Bootstrap friction.** Each app requires a separate browser confirmation.
-- **Registration scaling.** 15 agents = 15 of your 100 app quota. With cloned repos, this grows further.
-
-**Recommendation:** Start with the shared model. Only switch to per-agent if you have a specific need for GitHub-native per-agent filtering and understand the trade-offs.
-
-### Naming Scheme (Per-Agent Mode)
-
-Per-agent mode uses a two-tier naming scheme:
-
-**Tier 1 — Default:** `{agent}-{user}-squad` (e.g., `flight-sabbour-squad`)
-
-**Tier 2 — Repo-qualified:** `{agent}-{user}-{repo}-squad` (used when Tier 1 name is already registered for a different project)
-
-The CLI automatically detects collisions and falls back to Tier 2 with a warning:
-
-```
-⚠️ `flight-sabbour-squad` already exists for a different project.
-   Registering as `flight-sabbour-coolproject-squad` instead.
-```
 
 ---
 
@@ -502,54 +700,57 @@ The CLI automatically detects collisions and falls back to Tier 2 with a warning
 
 ### Phase 1: Foundation (MVP)
 
-**Goal:** All agents comment and commit under the shared bot identity.
+**Goal:** All agents comment and commit under bot identity using the per-role model (Tier 2).
 
-- [ ] `squad identity create` CLI command (manifest flow, one app)
-- [ ] Credential storage (`.squad/identity/apps/squad.json`, `.squad/identity/keys/squad.pem`)
-- [ ] `SquadGitHubClient` with `commentAs()` method
+- [ ] Role slug mapping (role name → canonical slug)
+- [ ] `squad identity create` CLI command — creates per-role apps via manifest flow
+- [ ] `squad identity create --simple` for Tier 1 (shared app)
+- [ ] Credential storage (`.squad/identity/apps/{role}.json`, `.squad/identity/keys/{role}.pem`)
+- [ ] `SquadGitHubClient` with tier-aware `commentAs()` and `resolveIdentity()`
 - [ ] Comment attribution formatting (emoji + agent name + role)
 - [ ] Commit message prefixing (`[AgentName] conventional commit message`)
-- [ ] Commit authoring as `{user}-squad[bot]`
-- [ ] `squad identity status` command
+- [ ] Commit authoring as `{user}-squad-{role}[bot]` (Tier 2)
+- [ ] `squad identity status` command (shows all role apps)
 - [ ] Fallback to `gh` CLI when identity not configured
-- [ ] `squad identity install <owner/repo>` for multi-repo
+- [ ] `squad identity install <owner/repo>` for multi-repo (installs all role apps)
 
-**Ships:** Next minor release. Estimated effort: 1-2 sprints (simpler than per-agent model).
+**Ships:** Next minor release. Estimated effort: 2-3 sprints.
 
 ### Phase 2: Full Operations
 
 **Goal:** All GitHub operations route through the shared identity.
 
-- [ ] PR creation/merge under shared identity
-- [ ] Label management under shared identity
-- [ ] Branch operations under shared identity
-- [ ] `squad identity rotate` key rotation
+- [ ] PR creation/merge under role identity
+- [ ] Label management under role identity
+- [ ] Branch operations under role identity
+- [ ] `squad identity rotate` key rotation (per-role)
 - [ ] PR review submission with agent attribution in review body
 
 **Ships:** Following minor release.
 
 ### Phase 3: CI/CD & Team Onboarding
 
-**Goal:** Shared identity works in CI and across development teams.
+**Goal:** Identity works in CI and across development teams.
 
-- [ ] Environment variable credential override (`SQUAD_APP_ID`, `SQUAD_PRIVATE_KEY`, `SQUAD_INSTALLATION_ID`)
-- [ ] GitHub Actions integration (one set of secrets per repo)
+- [ ] Environment variable credential override (per-role: `SQUAD_{ROLE}_APP_ID`, etc.)
+- [ ] GitHub Actions integration (one set of secrets per role per repo)
 - [ ] `squad identity export` for CI secret setup
 - [ ] Documentation for onboarding paths (key sharing, CI-only)
-- [ ] Rate limit monitoring
+- [ ] Rate limit monitoring (per-role granularity)
 
 **Ships:** After Phase 2 stabilizes.
 
 ### Phase 4: Advanced Identity
 
-**Goal:** Per-agent apps for users who need them, plus rich identity features.
+**Goal:** Per-agent apps (Tier 3) for users who need them, plus rich identity features.
 
 - [ ] `squad identity create --per-agent` command
 - [ ] Per-agent credential storage and management
 - [ ] Two-tier naming with collision detection
-- [ ] Custom app avatar configuration
+- [ ] Custom per-role avatar generation (planned for Tier 2)
+- [ ] Custom per-agent avatar configuration (Tier 3)
 - [ ] Sub-identity migration path (if GitHub ships the feature)
-- [ ] Identity analytics (which agent is most active, rate limit usage)
+- [ ] Identity analytics (which agent/role is most active, rate limit usage)
 
 **Ships:** When there's user demand.
 
@@ -557,27 +758,23 @@ The CLI automatically detects collisions and falls back to Tier 2 with a warning
 
 ## Open Questions
 
-1. **Avatar strategy.** The shared app gets one avatar. Should it be user-customizable, or should Squad provide a default? Since per-agent avatars require advanced mode, the shared avatar should represent "your squad" as a whole.
+1. **Per-role avatar strategy.** Each role app gets its own avatar. Should Squad auto-generate role-specific icons (e.g., a wrench for backend, a flask for tester), or let users upload their own? Auto-generation reduces bootstrap friction; custom avatars let teams express personality.
 
-2. **Webhook events.** GitHub Apps can receive webhooks. Should the shared app listen for events (new issues, PR comments) to enable proactive agent behavior? This is a significant architecture expansion — out of scope for MVP but worth designing the extension point.
+2. **Webhook events.** GitHub Apps can receive webhooks. Should role apps listen for events (new issues, PR comments) to enable proactive agent behavior? This is a significant architecture expansion — out of scope for MVP but worth designing the extension point.
 
 3. **Existing `gh-auth-isolation` skill.** Squad already has a skill for managing multiple GitHub identities via `gh auth`. The App-based approach serves a different purpose — `gh-auth-isolation` handles human multi-account; `squad identity` handles bot identity for agents. Both coexist.
 
-4. ~~**Sub-identity timeline.**~~ **Resolved.** The shared app model IS effectively the "single app with attribution" approach. If GitHub later ships sub-identity support for Apps, it would enhance the shared model by giving per-agent display names within the single app — a natural upgrade, not a migration.
+4. ~~**Sub-identity timeline.**~~ **Resolved.** All three tiers benefit if GitHub later ships sub-identity support. For Tier 2, sub-identities could give per-agent display names within each role app. This is a natural upgrade, not a migration.
 
-5. ~~**Repo-owner model as canonical recommendation?**~~ **Resolved.** With the shared app model, there is no per-agent naming collision problem. Each user has one app. The repo-owner model simplifies further: owner registers `{owner}-squad`, contributors use `gh` CLI fallback locally or bring their own `{contributor}-squad` app.
+5. ~~**Repo-owner model as canonical recommendation?**~~ **Resolved.** With the per-role model, there is no per-agent naming collision problem. Roles are universal — `sabbour-squad-lead` works identically in every repo.
 
-6. ~~**34-char name limit concerns?**~~ **Resolved.** `{user}-squad` is always short enough. The 34-char limit only affects per-agent advanced mode, where it's documented as a known trade-off.
+6. ~~**34-char name limit concerns?**~~ **Resolved.** Per-role names (`{user}-squad-{role}`) are consistently short. The 34-char limit only affects Tier 3 (per-agent), where it's documented as a known trade-off.
+
+7. **Unmapped roles.** If a team defines a custom role not in the standard slug table, should it fall back to `lead`, prompt the user to map it, or create a new role app? Current design falls back to `lead` — this should be configurable.
 
 ---
 
 ## Alternative Approaches Considered
-
-### Per-Agent Apps (Original Proposal — Demoted to Advanced Mode)
-
-One GitHub App per agent: `{agent}-{user}-squad`. Gives distinct `[bot]` identity, avatar, and GitHub-native filtering per agent.
-
-**Why it's not the default:** The 34-character name limit, cross-repo collision logic, N-credential management, N-browser-confirmation bootstrap, and 100-app scaling concerns create cascading complexity that outweighs the per-agent filtering benefit. Still available as advanced mode for users who want it.
 
 ### Machine Users (Rejected)
 
@@ -601,11 +798,20 @@ Originally considered using the owner's account (via `gh` CLI) for assignment an
 
 ## Decision
 
-**Build the shared GitHub App model (`{user}-squad`), phased starting with MVP (comments + commits).** One app per user. Agent attribution in comment bodies and commit messages. Per-agent apps available as advanced mode for users who need GitHub-native per-agent filtering.
+**Build the three-tier identity model with per-role apps (Tier 2) as the recommended default.** Tier 1 (shared) available for users who want minimal setup. Tier 3 (per-agent) available as advanced mode for users who need per-agent GitHub filtering.
 
-The abstraction layer (`SquadGitHubClient.commentAs()`) insulates agent code from the identity backend, so future changes (sub-identities, per-agent advanced mode, different providers) don't cascade. Agent code never constructs comments directly — it provides content and the client handles identity formatting.
+The per-role model (`{user}-squad-{role}`) is the sweet spot:
+- **8 roles** cover every agent across every repo — bounded, not unbounded.
+- **Bot names show role** — you can see at a glance that a lead, a tester, or a backend developer posted.
+- **Per-role avatars** give visual differentiation without per-agent complexity.
+- **No naming collisions** — roles are universal, unlike agent names which differ per repo.
+- **~8 credentials** to manage — more than 1, but bounded and predictable.
 
-Squad's label-based routing handles assignment and review dispatch. The shared app provides identity for visible operations. One registration, one key, one install per repo — the simplest model that achieves the core goal: **stop looking like you're talking to yourself on GitHub**.
+The abstraction layer (`SquadGitHubClient.commentAs()`) insulates agent code from the identity tier. Agent code provides content; the client resolves the right app identity based on the configured tier. Switching between tiers requires zero agent code changes.
+
+Squad's label-based routing handles assignment and review dispatch. The identity layer provides GitHub-visible identity for comments, commits, and PRs. The roles map directly from `team.md` — the routing table Squad already maintains.
+
+**Stop looking like you're talking to yourself on GitHub — and now people can see WHAT KIND of specialist is talking.**
 
 ---
 
