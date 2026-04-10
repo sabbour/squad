@@ -37,3 +37,9 @@ export {
   resolveToken,
   clearTokenCache,
 } from './tokens.js';
+
+export {
+  execWithRoleToken,
+  withRoleToken,
+} from './exec.js';
+export type { ExecResult } from './exec.js';
