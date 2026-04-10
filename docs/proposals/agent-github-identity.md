@@ -590,6 +590,21 @@ Today Squad uses the `gh` CLI for GitHub operations. The identity system would i
 
 The per-role app model (Tier 2) keeps onboarding simple while providing meaningful identity.
 
+### Fork → Install → Work → PR
+
+The natural GitHub workflow is:
+
+1. **Fork** the repo you want to work on (if you don't own it).
+2. **Install your role apps** on your fork: `squad identity install yourname/forked-repo`
+3. **Work on your fork** — commit, push, run Squad, open PRs upstream.
+
+The key insight: you install identity apps on **repos you own or control**, not on someone else's upstream. This is the same principle as personal GitHub Actions secrets or repo deploy keys — they live on your fork. When you open a PR upstream, your agents' contributions carry the role app identity, and the maintainers see actions clearly attributed to specialized roles.
+
+For contributors without their own repos:
+
+- **On a shared/team repo:** Identity apps are installed once by an admin or team lead. All members' agents use the same shared identity (all posts appear as `team-squad-lead`, `team-squad-backend`, etc.). Agent attribution comes from the comment body.
+- **Locally (no install):** Agents fall back to `gh` CLI auth using your personal token. You get full functionality; bot identity just appears as your personal account.
+
 ### Clone → Run → Done
 
 1. Clone any repo with Squad configured.
@@ -660,6 +675,60 @@ Two paths:
 1. **Transfer the keys.** Copy the PEM files from a secure vault (1Password, Azure Key Vault, etc.) to `.squad/identity/keys/`. The `apps/*.json` files are already committed — only the keys need sharing.
 
 2. **CI-only model.** Only CI/CD has the keys (stored as repo secrets). Developers use `gh` CLI fallback locally. Bot identity only appears on CI-generated comments and commits. For Tier 2, this means ~8 secret variables per repo — manageable and bounded.
+
+---
+
+## Copilot CLI Integration
+
+The preferred mode of Squad agent execution is via the **GitHub Copilot CLI**, which spawns agents as background processes and sets their environment variables. This is where the identity system becomes nearly invisible to agents — they just use `gh` normally.
+
+### How GH_TOKEN Injection Works
+
+When Squad's agent manager spawns an agent for a specific role, it:
+
+1. **Resolves the agent's role** from the team roster (e.g., "EECOM" is a Core Dev → `backend` role).
+2. **Loads the role app's GitHub App credentials** (stored in `.squad/identity/keys/`).
+3. **Generates an installation token** scoped to that app and the target repo.
+4. **Sets `GH_TOKEN` in the spawn environment** before starting the agent process.
+
+The `gh` CLI respects the `GH_TOKEN` environment variable. When set, `gh` automatically authenticates as that token — which means every `gh` call the agent makes (creating issues, commenting on PRs, pushing code, etc.) goes through the app's identity. The agent sees no special logic, no `.squad/config`, no identity library. It just calls `gh` normally:
+
+```typescript
+// Agent code (unchanged from today)
+exec('gh issue comment 42 --body "Fix deployed"');
+```
+
+Squad's environment injection handles the rest. The comment appears under the role app's `[bot]` identity (`sabbour-squad-backend[bot]`), even though the agent has no idea identity is involved.
+
+### The Transparency Principle
+
+This design ensures:
+
+- **Agents don't change.** They use `gh` as they always have — no SDK imports, no identity methods, no special handling. The task tool prompt doesn't mention identity at all.
+- **Operations are auditable.** Every action appears under a clear bot identity (derived from role), making it easy to filter GitHub events by role or trace agent behavior.
+- **Switching identity tiers is invisible.** If you swap from Tier 1 (shared app) to Tier 2 (per-role), the agent behavior doesn't change — only the `GH_TOKEN` that Squad injects into its environment.
+
+### Example: Comment with Identity
+
+When you run `task` to spawn an agent, the flow is:
+
+```
+1. User invokes: task tool with agent request
+   ↓
+2. Squad identifies agent's role (e.g., "Core Dev" → backend)
+   ↓
+3. Squad loads backend app credentials and generates an install token
+   ↓
+4. Squad spawns agent with GH_TOKEN=<install-token>
+   ↓
+5. Agent runs normally: gh issue comment 42 --body "..."
+   ↓
+6. gh CLI uses GH_TOKEN automatically
+   ↓
+7. GitHub records comment as posted by sabbour-squad-backend[bot]
+```
+
+The agent itself never sees or configures identity. It's pure environment-based authentication.
 
 ---
 
