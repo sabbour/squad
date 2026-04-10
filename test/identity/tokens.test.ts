@@ -234,6 +234,155 @@ describe('token cache', () => {
 });
 
 // ============================================================================
+// resolveToken — environment variable credential override
+// ============================================================================
+
+describe('resolveToken with env vars', () => {
+  const ENV_KEYS = [
+    'SQUAD_BACKEND_APP_ID',
+    'SQUAD_BACKEND_PRIVATE_KEY',
+    'SQUAD_BACKEND_INSTALLATION_ID',
+  ] as const;
+
+  afterEach(() => {
+    // Clean up env vars after every test in this block
+    for (const key of ENV_KEYS) {
+      delete process.env[key];
+    }
+  });
+
+  it('uses env var credentials when all three are set (raw PEM)', async () => {
+    // Set up env vars with raw PEM (starts with -----BEGIN)
+    process.env.SQUAD_BACKEND_APP_ID = '55555';
+    process.env.SQUAD_BACKEND_PRIVATE_KEY = TEST_PEM;
+    process.env.SQUAD_BACKEND_INSTALLATION_ID = '99999';
+
+    const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        token: 'ghs_env_token',
+        expires_at: expiresAt,
+      }),
+    });
+    vi.stubGlobal('fetch', mockFetch);
+
+    // Pass a directory with NO filesystem credentials — env var should still work
+    const dir = makeTmpDir();
+    const result = await resolveToken(dir, 'backend');
+
+    expect(result).toBe('ghs_env_token');
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('decodes base64-encoded PEM from env var', async () => {
+    const pemBase64 = Buffer.from(TEST_PEM).toString('base64');
+
+    process.env.SQUAD_BACKEND_APP_ID = '55555';
+    process.env.SQUAD_BACKEND_PRIVATE_KEY = pemBase64;
+    process.env.SQUAD_BACKEND_INSTALLATION_ID = '99999';
+
+    const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        token: 'ghs_base64_env_token',
+        expires_at: expiresAt,
+      }),
+    });
+    vi.stubGlobal('fetch', mockFetch);
+
+    const dir = makeTmpDir();
+    const result = await resolveToken(dir, 'backend');
+
+    expect(result).toBe('ghs_base64_env_token');
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('falls back to filesystem when only partial env vars are set', async () => {
+    // Only set 2 of 3 env vars — should NOT use env path
+    process.env.SQUAD_BACKEND_APP_ID = '55555';
+    process.env.SQUAD_BACKEND_INSTALLATION_ID = '99999';
+    // SQUAD_BACKEND_PRIVATE_KEY is intentionally NOT set
+
+    const dir = makeTmpDir();
+
+    // Set up filesystem credentials so we can verify fallback
+    const appsDir = join(dir, '.squad', 'identity', 'apps');
+    const keysDir = join(dir, '.squad', 'identity', 'keys');
+    mkdirSync(appsDir, { recursive: true });
+    mkdirSync(keysDir, { recursive: true });
+    writeFileSync(
+      join(appsDir, 'backend.json'),
+      JSON.stringify({ appId: 77, appSlug: 'fs-app', installationId: 200 }),
+    );
+    writeFileSync(join(keysDir, 'backend.pem'), TEST_PEM);
+
+    const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        token: 'ghs_filesystem_token',
+        expires_at: expiresAt,
+      }),
+    });
+    vi.stubGlobal('fetch', mockFetch);
+
+    const result = await resolveToken(dir, 'backend');
+
+    // Should have used filesystem credentials (appId 77), not env var (55555)
+    expect(result).toBe('ghs_filesystem_token');
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('env var takes precedence over filesystem credentials', async () => {
+    const dir = makeTmpDir();
+
+    // Set up BOTH filesystem and env var credentials
+    const appsDir = join(dir, '.squad', 'identity', 'apps');
+    const keysDir = join(dir, '.squad', 'identity', 'keys');
+    mkdirSync(appsDir, { recursive: true });
+    mkdirSync(keysDir, { recursive: true });
+    writeFileSync(
+      join(appsDir, 'backend.json'),
+      JSON.stringify({ appId: 77, appSlug: 'fs-app', installationId: 200 }),
+    );
+    writeFileSync(join(keysDir, 'backend.pem'), TEST_PEM);
+
+    process.env.SQUAD_BACKEND_APP_ID = '55555';
+    process.env.SQUAD_BACKEND_PRIVATE_KEY = TEST_PEM;
+    process.env.SQUAD_BACKEND_INSTALLATION_ID = '99999';
+
+    const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+    let callCount = 0;
+    const mockFetch = vi.fn().mockImplementation(async (url: string) => {
+      callCount++;
+      // Verify the installation ID used — env var should use 99999
+      expect(url).toContain('/99999/');
+      return {
+        ok: true,
+        json: async () => ({
+          token: 'ghs_env_wins',
+          expires_at: expiresAt,
+        }),
+      };
+    });
+    vi.stubGlobal('fetch', mockFetch);
+
+    const result = await resolveToken(dir, 'backend');
+
+    expect(result).toBe('ghs_env_wins');
+    expect(callCount).toBe(1);
+  });
+
+  it('returns null when no env vars and no filesystem credentials exist', async () => {
+    const dir = makeTmpDir();
+    const result = await resolveToken(dir, 'backend');
+    expect(result).toBeNull();
+  });
+});
+
+// ============================================================================
 // getInstallationToken — error handling
 // ============================================================================
 
