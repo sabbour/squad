@@ -21,3 +21,5 @@ Scroll flicker fix required careful animation frame budget management. Slowdown 
 - **40px is the real design target.** GitHub comment avatars are tiny. Every shape decision was validated against "would this be recognizable as a colored blob at 40px?" If not, simplify.
 - **Color choices carry semantic weight.** Terminal green for backend, red for security, violet for testing — these aren't arbitrary. They map to existing developer mental models (terminal, alerts, labs).
 
+
+📌 **Team update (2026-04-10T19:15:32Z):** Avatar design system finalized and documented in `docs/proposals/agent-avatar-prompts.md`. Unified design across 8 role personas: dark background (#0D1117), geometric motifs, single accent color per role, optimized for 40×40px GitHub avatar size. Integrated with per-role GitHub Apps identity model. Ready for implementation.
