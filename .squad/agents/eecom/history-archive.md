@@ -4,12 +4,6 @@
 
 ## Learnings
 
-### PR #942 rebase — cherry-pick from insider-based fork branch (2026-04-12)
-
-**Context:** PR #942 from tamirdresher's fork was retargeted from `insider` to `dev`, causing 29 files in the diff when only 3 commits (4 files relevant to dev) were the actual fix. Cherry-picked the 3 fix commits onto a clean `squad/942-rebase-type-safety` branch from dev, resolving conflicts where insider-only files (skill.ts, cross-package-exports.test.ts) didn't exist on dev. Dropped the `escapeYamlValue` import and APM YAML generation function from init.ts since skill.ts doesn't exist on dev. Opened #963 as the clean replacement, closed #942.
-
-**Key lesson:** When cherry-picking from an insider-based branch to dev, expect modify/delete conflicts for files that only exist on insider. Always verify the base assumptions of each change — imports referencing insider-only modules must be dropped or adapted.
-
 ### Loop command: second-round review fixes (#767) (2025-07-26)
 
 **Context:** Three Copilot review comments on PR #767: (1) `teamRoot` was set to `workTreeRoot` but `.squad/` may live in the main checkout when running inside a git worktree — should derive from `detectSquadDir().path`, (2) `generateLoopFile()` hardcoded the full loop.md scaffold inline, duplicating `templates/loop.md`, (3) docs said `gh` was optional but code hard-requires `gh copilot` unless `--agent-cmd` is passed.
@@ -317,4 +311,3 @@ Executed 3 tasks across 2 waves: economy mode (#500, PR #504), node:sqlite fix (
 **Pattern:** `resolveGlobalSquadPath()` returns the container; `ensurePersonalSquadDir()` creates the subdirectory the rest of the system looks for.
 📌 **Team update (2026-03-25T18:11Z):** Fixed #590 personal squad path regression — getPersonalSquadRoot() now uses canonical personal-squad/ subdirectory like esolvePersonalSquadDir() and nsurePersonalSquadDir(). Committed on squad/590-fix-personal-squad-root. FIDO found same bug in shell/index.ts → work passed to CONTROL for full sweep revision. Awaiting FIDO re-review.
 
-📌 **Archived:** History exceeds 15KB. Full history preserved in `history-archive.md`. Session log: 2026-04-10T18:35:28Z.

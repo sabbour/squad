@@ -240,3 +240,129 @@ Triaged 14 untriaged issues (3 docs, 6 community features, 3 bugs, 2 questions).
 - #357, #336, #335, #334, #333, #332, #316 (A2A) — stays shelved per existing decision
 - #581 (ADO PRD) — P2, blocked until #341 (SDK-first parity) ships
 
+---
+
+# 2026-03-26: CI deletion guard and source tree canary
+
+**By:** Booster (CI/CD)
+
+## What
+
+Added two safety checks to squad-ci.yml:
+1. **Source tree canary** — verifies critical files exist at PR time
+2. **Large deletion guard** — fails PRs that delete >50 files without `large-deletion-approved` label
+
+Branch protection on dev requested (may need manual setup).
+
+## Why
+
+Incident #631 — @copilot deleted 361 files on dev with no CI gate catching it.
+
+---
+
+# 2026-03-26: Copilot git safety rules
+
+**By:** RETRO (Security)
+
+## What
+
+Added mandatory Git Safety section to copilot-instructions.md:
+- Prohibits `git add .` and `git commit -a`
+- Requires feature branches and PRs for all commits
+- Adds pre-push checklist (verify file count, check for unintended deletions, build succeeds)
+- Defines red-flag stop conditions (>20 files, unintended deletions, out-of-scope changes)
+
+## Why
+
+Incident #631 — @copilot used destructive staging on an incomplete working tree, deleting 361 files.
+
+---
+
+# 2026-04-10: User directive — GitHub Apps identity scope
+
+**By:** Ahmed Sabbour (via Copilot)
+
+## What
+
+GitHub Apps for agent identity do **NOT** need to handle issue assignment or PR review requests via GitHub APIs. Squad's own orchestration handles routing — apps only need to act (comment, commit, open PRs) under their own identity.
+
+## Why
+
+User request — simplifies the GitHub Apps integration scope. Assignment and review routing stay internal to Squad's label-based system.
+
+---
+
+# Decision: Agent GitHub Identity via Per-Agent GitHub Apps
+
+**By:** Flight  
+**Date:** 2026-03-27
+
+## Context
+
+Squad agents currently act through the repo owner's personal GitHub account. All comments, commits, and PR operations show as the owner. Attribution is text-only (`**Triage (Leela):**`). This limits audit clarity, external trust, and credential isolation.
+
+## Decision
+
+Adopt a **one GitHub App per agent** model for Squad member identity on GitHub.
+
+### Key architectural choices:
+
+1. **Per-agent Apps over single shared App** — the identity benefit requires distinct bot accounts. A single app with text attribution is marginally better than today.
+
+2. **Per-agent Apps over machine users** — machine users cost paid seats. GitHub recommends Apps.
+
+3. **Hybrid fallback** — Apps for visible operations (comments, commits, PRs). Owner's `gh` CLI for operations Apps can't do (issue assignment, review requests). Fallback to `gh` CLI when no identity is configured.
+
+4. **`SquadGitHubClient.asAgent()` abstraction** — agent code never touches auth directly. Backend can be swapped (per-app → sub-identities) without cascading changes.
+
+5. **Credential storage** — App metadata committed (`.squad/identity/apps/*.json`), private keys gitignored (`.squad/identity/keys/*.pem`), env var overrides for CI.
+
+6. **Phased rollout** — Phase 1 (comments + commits), Phase 2 (full operations), Phase 3 (CI/CD), Phase 4 (advanced identity).
+
+## Impact
+
+- All agents must respect identity configuration when making GitHub API calls
+- New CLI commands: `squad identity create`, `squad identity status`, `squad identity rotate`
+- `.squad/identity/` directory structure added
+- `.gitignore` must include `.squad/identity/keys/`
+- Existing setups continue working via fallback (no breaking change)
+
+## Proposal
+
+Full proposal at `docs/proposals/agent-github-identity.md`.
+
+---
+
+# Decision: Versioning Policy — No Prerelease Versions on dev/main
+
+**By:** Flight (Lead)  
+**Date:** 2026-03-29  
+**Requested by:** Dina  
+**Status:** DECIDED  
+**Confidence:** Medium (confirmed by PR #640 incident, PR #116 prerelease leak, CI gate implementation)
+
+## Decision
+
+1. **All packages use strict semver** (`MAJOR.MINOR.PATCH`). No prerelease suffixes on `dev` or `main`.
+2. **Prerelease versions are ephemeral.** `bump-build.mjs` creates `-build.N` for local testing only — never committed.
+3. **SDK and CLI versions must stay in sync.** Divergence silently breaks npm workspace resolution.
+4. **Surgeon owns version bumps.** Other agents must not modify `version` fields in `package.json` unless fixing a prerelease leak.
+5. **CI enforcement via `prerelease-version-guard`** blocks PRs with prerelease versions. `skip-version-check` label is Surgeon-only.
+
+## Why
+
+The repo had no documented versioning policy. This caused two incidents:
+
+- **PR #640:** Prerelease version `0.9.1-build.4` silently broke workspace resolution. The semver range `>=0.9.0` does not match prerelease versions, causing npm to install a stale registry package instead of the local workspace link. Four PRs (#637–#640) patched symptoms before the root cause was found.
+- **PR #116:** Surgeon set versions to `0.9.1-build.1` instead of `0.9.1` on a release branch because there was no guidance on what constitutes a clean release version.
+
+## Skill Reference
+
+Full policy documented in `.squad/skills/versioning-policy/SKILL.md`.
+
+## Impact
+
+- All agents must follow the versioning policy when touching `package.json`
+- Surgeon charter should reference this skill for release procedures
+- CI pipeline enforces the policy via automated gate
+

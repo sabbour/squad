@@ -135,3 +135,5 @@ Prepared comprehensive release playbook and CI improvement plan for Brady's revi
 - Pre-release validation prevents 90% of publish issues
 - Culture: "If the same problem happens twice, the playbook failed"
 - Documentation must be user-first (Brady's perspective, not technical jargon)
+
+📌 **Team update (2026-04-10T18:35:28Z):** Versioning policy decision merged to `decisions.md`. No prerelease versions on dev/main. SDK and CLI versions must stay in sync. Surgeon owns version bumps. CI `prerelease-version-guard` enforces. Skill documented at `.squad/skills/versioning-policy/SKILL.md`. All agents must follow when touching `package.json`.
