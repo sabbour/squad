@@ -463,6 +463,23 @@ Full policy documented in `.squad/skills/versioning-policy/SKILL.md`.
 - Storage functions take the **project root** path (parent of `.squad/`), not the `.squad/` dir
 - If identity resolution ever needs to go async (e.g., remote key vaults), these will need an async wrapper — but that's a Phase 2 concern
 
+---
+
+### 2026-04-10: execWithRoleToken utility for out-of-spawn gh calls
+
+**Author:** EECOM  
+**Status:** Implemented  
+**Issue:** #5  
+
+**Context:** GH_TOKEN injection from #2 covers only `spawnAgent()`. CLI commands and watch-mode workflows that call `gh pr create` / `gh pr merge` outside spawn need role bot identity.
+
+**Decision:** Export two utilities from `@bradygaster/squad-sdk`:
+- `execWithRoleToken(teamRoot, roleSlug, command)` — wraps shell command with token injection
+- `withRoleToken(teamRoot, roleSlug, fn)` — wraps async callback with token injection
+
+Both use same save/restore pattern as spawn-token-injection, graceful fallback when no identity configured.
+
+**Rationale:** Reusing `resolveToken()` keeps token lifecycle (caching, refresh) in one place. Two flavors cover CLI scripting and programmatic API use. Graceful fallback preserves existing non-identity workflows.
 
 ---
 
