@@ -366,3 +366,64 @@ Full policy documented in `.squad/skills/versioning-policy/SKILL.md`.
 - Surgeon charter should reference this skill for release procedures
 - CI pipeline enforces the policy via automated gate
 
+---
+
+### 2026-04-10: User directive — GitHub App naming and identity scope
+**By:** Ahmed Sabbour (via Copilot)
+
+**What:** GitHub App naming/scoping must be specific to three dimensions: (1) the team member, (2) the user it's executing on behalf of, and (3) the repository. This means the app identity encodes who the agent is, whose Squad it belongs to, and which repo it operates on.
+
+**Why:** User request — prevents naming collisions across users and repos. Two different users both running a "Flight" agent on different repos get distinct apps. Captured for team memory.
+
+---
+
+### 2026-04-10: User directive — registration-as-installation cross-repo reuse
+**By:** Ahmed Sabbour (via Copilot)
+
+**What:** The registration-as-installation model assumes agent names are consistent across repos owned by the same user. A "Flight" app registered once by a user can be installed on multiple repos because the same user runs the same Squad roster. If different repos have different team compositions or naming universes, the model still works — you just register the union of all agent names, and install each app only on the repos where that agent is active.
+
+**Why:** User request — clarifies the cross-repo identity reuse assumption. Captured for team memory.
+
+---
+
+### 2026-04-10: User directive — cross-repo naming collision edge case
+**By:** Ahmed Sabbour (via Copilot)
+
+**What:** The cross-repo reuse model breaks when cloning someone else's repo. If I clone a repo I don't control, it may have a Squad with agent names that collide with my own registrations (e.g., both repos have a "Flight" but with different charters/roles). The `{agent}-{user}-squad` naming doesn't distinguish between MY Flight and THEIR Flight. This needs a clear design answer.
+
+**Why:** User request — critical edge case for the identity architecture. Captured for team memory.
+
+---
+
+### 2026-04-10: User directive — role-based app model
+**By:** Ahmed Sabbour (via Copilot)
+
+**What:** Consider a role-based app model instead of per-name or per-user. One app per role per user — e.g., `sabbour-squad-lead`, `sabbour-squad-backend`. If Flight (repo A) and Leela (repo B) are both Leads, they share the `sabbour-squad-lead` app. This gives per-role identity on GitHub while keeping app count bounded by role count (typically 5-8), not agent count or repo count.
+
+**Why:** User request — elegant middle ground between shared (1 app, no per-agent identity) and per-agent (N apps, scaling problems). Role count is small and stable. Captured for team memory.
+
+---
+
+### 2026-04-10: User directive — agent avatar generation
+**By:** Ahmed Sabbour (via Copilot)
+
+**What:** Squad should bundle pre-created avatars for each possible persona/role. Generate image generation prompts for each role so the user can pass them to an image generator. Avatars would be used as the GitHub App profile picture for the per-role app model.
+
+**Why:** User request — gives each role-based bot a visually distinct identity on GitHub. Captured for team memory.
+
+---
+
+### 2026-03-28: Agent Avatar Design System
+**By:** INCO  
+**Scope:** Visual identity for Squad agent GitHub App profiles
+
+**What:** All Squad agent avatars follow a unified design system:
+- **Background:** Solid `#0D1117` (GitHub dark theme base) — not transparent
+- **Style:** Flat geometric icons, single accent color per role + white accents
+- **Motifs:** Abstract/symbolic shapes mapped to role function (not literal objects)
+- **Target size:** Designed for legibility at 40×40px GitHub avatar size
+
+**Why:** Transparent backgrounds break on GitHub dark mode. Photorealistic or illustrated styles lose detail at avatar sizes. A constrained system (one accent color, shared background, geometric shapes) ensures the set reads as a cohesive team while each role remains instantly distinguishable.
+
+**Impact:** Image generation prompts live at `docs/proposals/agent-avatar-prompts.md`. Any new Squad roles should follow the same design system (dark bg, single accent, geometric motif). Color assignments are documented in the prompt file's color system table.
+

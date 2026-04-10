@@ -133,3 +133,57 @@ All avatars use GitHub's dark theme base color (`#0D1117`) as background. This e
 - **DALL-E 3** — Best for following precise geometric instructions
 - **Midjourney v6** — Add `--style raw --ar 1:1` for cleaner icon output
 - **Ideogram** — Strong with flat/vector styles and text avoidance
+
+---
+
+## Copy-Pastable Prompts
+
+Complete, self-contained prompts ready to paste into any image generator. Base style is pre-combined.
+
+### Lead
+
+```
+Flat geometric icon on a solid dark navy (#0D1117) circular background. Minimal, abstract, no text, no human features. Thin precise lines and shapes using a single accent color plus white (#E6EDF3). Subtle glow or luminance effect on the accent color to add depth. Clean vector aesthetic — think developer tool logo, not illustration. Square 1:1 aspect ratio. High contrast, legible at 40×40px. No gradients, no shadows, no 3D effects. A minimal abstract compass rose or asterisk shape made of 6-8 thin intersecting lines radiating from a center point, rendered in amber (#F0883E) with white (#E6EDF3) accents at the endpoints. The center has a small solid circle suggesting a decision node. Subtle luminous glow on the amber lines.
+```
+
+### Frontend
+
+```
+Flat geometric icon on a solid dark navy (#0D1117) circular background. Minimal, abstract, no text, no human features. Thin precise lines and shapes using a single accent color plus white (#E6EDF3). Subtle glow or luminance effect on the accent color to add depth. Clean vector aesthetic — think developer tool logo, not illustration. Square 1:1 aspect ratio. High contrast, legible at 40×40px. No gradients, no shadows, no 3D effects. Three nested rounded rectangles of decreasing size, centered and slightly offset to suggest depth/layering, rendered in electric blue (#58A6FF) with thin white (#E6EDF3) outlines. The innermost rectangle is a solid filled shape. The composition suggests a component hierarchy or nested UI frames. Subtle luminous glow on the blue elements.
+```
+
+### Backend
+
+```
+Flat geometric icon on a solid dark navy (#0D1117) circular background. Minimal, abstract, no text, no human features. Thin precise lines and shapes using a single accent color plus white (#E6EDF3). Subtle glow or luminance effect on the accent color to add depth. Clean vector aesthetic — think developer tool logo, not illustration. Square 1:1 aspect ratio. High contrast, legible at 40×40px. No gradients, no shadows, no 3D effects. A minimal abstract shape composed of three horizontal parallel lines connected by two vertical lines on alternating sides, forming a zigzag circuit-path or data-flow pattern, rendered in terminal green (#3FB950) with white (#E6EDF3) node dots at each connection point. Subtle luminous glow on the green lines.
+```
+
+### Tester
+
+```
+Flat geometric icon on a solid dark navy (#0D1117) circular background. Minimal, abstract, no text, no human features. Thin precise lines and shapes using a single accent color plus white (#E6EDF3). Subtle glow or luminance effect on the accent color to add depth. Clean vector aesthetic — think developer tool logo, not illustration. Square 1:1 aspect ratio. High contrast, legible at 40×40px. No gradients, no shadows, no 3D effects. An abstract diamond or rhombus shape with a checkmark inscribed inside it, rendered in violet (#BC8CFF) with thin white (#E6EDF3) lines. The diamond suggests a decision gate, and the checkmark suggests passing validation. Subtle luminous glow on the violet elements.
+```
+
+### DevOps
+
+```
+Flat geometric icon on a solid dark navy (#0D1117) circular background. Minimal, abstract, no text, no human features. Thin precise lines and shapes using a single accent color plus white (#E6EDF3). Subtle glow or luminance effect on the accent color to add depth. Clean vector aesthetic — think developer tool logo, not illustration. Square 1:1 aspect ratio. High contrast, legible at 40×40px. No gradients, no shadows, no 3D effects. An abstract infinity loop or continuous cycle formed by two overlapping rounded triangles or a stylized figure-eight, rendered in warm orange (#D29922) with white (#E6EDF3) directional arrow-tips at two points along the loop. Subtle luminous glow on the orange lines.
+```
+
+### Docs
+
+```
+Flat geometric icon on a solid dark navy (#0D1117) circular background. Minimal, abstract, no text, no human features. Thin precise lines and shapes using a single accent color plus white (#E6EDF3). Subtle glow or luminance effect on the accent color to add depth. Clean vector aesthetic — think developer tool logo, not illustration. Square 1:1 aspect ratio. High contrast, legible at 40×40px. No gradients, no shadows, no 3D effects. Three horizontal lines of decreasing width stacked vertically like an abstract text block, with a small angular bracket (>) to the left of the top line, rendered in teal (#39D2C0) with white (#E6EDF3) accents. Subtle luminous glow on the teal elements.
+```
+
+### Security
+
+```
+Flat geometric icon on a solid dark navy (#0D1117) circular background. Minimal, abstract, no text, no human features. Thin precise lines and shapes using a single accent color plus white (#E6EDF3). Subtle glow or luminance effect on the accent color to add depth. Clean vector aesthetic — think developer tool logo, not illustration. Square 1:1 aspect ratio. High contrast, legible at 40×40px. No gradients, no shadows, no 3D effects. An abstract hexagonal shield outline — a regular hexagon with a vertical line bisecting it from top to bottom, rendered in red (#F85149) with white (#E6EDF3) line accents. The bisecting line suggests a lock mechanism or sealed boundary. Subtle luminous glow on the red elements.
+```
+
+### Data
+
+```
+Flat geometric icon on a solid dark navy (#0D1117) circular background. Minimal, abstract, no text, no human features. Thin precise lines and shapes using a single accent color plus white (#E6EDF3). Subtle glow or luminance effect on the accent color to add depth. Clean vector aesthetic — think developer tool logo, not illustration. Square 1:1 aspect ratio. High contrast, legible at 40×40px. No gradients, no shadows, no 3D effects. Three to four vertical bars of varying heights arranged side by side like a minimal bar chart, with small diamond-shaped data points connected by a thin diagonal line overlaid across the tops of the bars, rendered in blue-violet (#79C0FF) with white (#E6EDF3) accents. Subtle luminous glow on the blue-violet elements.
+```
