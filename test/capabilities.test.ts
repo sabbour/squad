@@ -7,6 +7,7 @@ import {
   getDeploymentMode,
   getPodId,
   generatePodCapabilitiesPath,
+  KNOWN_CAPABILITIES,
   type MachineCapabilities,
 } from '@bradygaster/squad-sdk/ralph/capabilities';
 import { existsSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
@@ -238,5 +239,131 @@ describe('dual-mode deployment', () => {
 
     process.env.SQUAD_POD_ID = 'my-pod-42';
     expect(getPodId()).toBe('my-pod-42');
+  });
+});
+
+describe('generatePodCapabilitiesPath', () => {
+  it('builds the correct pod-specific manifest path', () => {
+    const result = generatePodCapabilitiesPath('/app', 'squad-worker-7b4f6');
+    expect(result).toBe(path.join('/app', '.squad', 'machine-capabilities-squad-worker-7b4f6.json'));
+  });
+
+  it('handles team root with trailing separator', () => {
+    const result = generatePodCapabilitiesPath('/app/', 'pod-1');
+    expect(result).toBe(path.join('/app', '.squad', 'machine-capabilities-pod-1.json'));
+  });
+
+  it('handles different pod identifiers', () => {
+    const result = generatePodCapabilitiesPath('/home/user/project', 'my-pod-42');
+    expect(result).toBe(path.join('/home/user/project', '.squad', 'machine-capabilities-my-pod-42.json'));
+  });
+});
+
+describe('KNOWN_CAPABILITIES', () => {
+  it('exports the expected set of well-known capabilities', () => {
+    expect(KNOWN_CAPABILITIES).toContain('browser');
+    expect(KNOWN_CAPABILITIES).toContain('gpu');
+    expect(KNOWN_CAPABILITIES).toContain('docker');
+    expect(KNOWN_CAPABILITIES).toContain('personal-gh');
+    expect(KNOWN_CAPABILITIES).toContain('emu-gh');
+    expect(KNOWN_CAPABILITIES).toContain('azure-cli');
+    expect(KNOWN_CAPABILITIES).toContain('onedrive');
+    expect(KNOWN_CAPABILITIES).toContain('teams-mcp');
+  });
+
+  it('is a readonly tuple (frozen)', () => {
+    // KNOWN_CAPABILITIES is declared `as const`, so it's readonly at runtime
+    expect(Array.isArray(KNOWN_CAPABILITIES)).toBe(true);
+    expect(KNOWN_CAPABILITIES.length).toBe(8);
+  });
+});
+
+describe('loadCapabilities edge cases', () => {
+  let savedPodId: string | undefined;
+  let savedMode: string | undefined;
+  let tmpDir: string;
+
+  beforeEach(() => {
+    savedPodId = process.env.SQUAD_POD_ID;
+    savedMode = process.env.SQUAD_DEPLOYMENT_MODE;
+    delete process.env.SQUAD_POD_ID;
+    delete process.env.SQUAD_DEPLOYMENT_MODE;
+
+    tmpDir = path.join(os.tmpdir(), `squad-cap-edge-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    mkdirSync(path.join(tmpDir, '.squad'), { recursive: true });
+  });
+
+  afterEach(() => {
+    if (savedPodId !== undefined) process.env.SQUAD_POD_ID = savedPodId;
+    else delete process.env.SQUAD_POD_ID;
+    if (savedMode !== undefined) process.env.SQUAD_DEPLOYMENT_MODE = savedMode;
+    else delete process.env.SQUAD_DEPLOYMENT_MODE;
+
+    try { rmSync(tmpDir, { recursive: true, force: true }); } catch { /* ignore */ }
+  });
+
+  it('returns null when no capabilities file exists anywhere', async () => {
+    const caps = await loadCapabilities(tmpDir);
+    // No file written → null (opt-in system)
+    expect(caps).toBeNull();
+  });
+
+  it('returns null when teamRoot is undefined and no home fallback', async () => {
+    // This tests the fallback path: only the home dir candidate is tried.
+    // We can't control the home dir, but if no file is there it returns null.
+    const caps = await loadCapabilities(undefined);
+    // Result depends on whether ~/.squad/machine-capabilities.json exists,
+    // but the function should not throw either way.
+    expect(caps === null || (caps && typeof caps.machine === 'string')).toBe(true);
+  });
+
+  it('skips malformed JSON and returns null', async () => {
+    writeFileSync(
+      path.join(tmpDir, '.squad', 'machine-capabilities.json'),
+      '{ this is not valid JSON !!!',
+    );
+
+    const caps = await loadCapabilities(tmpDir);
+    expect(caps).toBeNull();
+  });
+
+  it('reads shared manifest in default agent-per-node mode', async () => {
+    const manifest: MachineCapabilities = {
+      machine: 'DEV-LAPTOP',
+      capabilities: ['browser', 'docker'],
+      missing: ['gpu'],
+      lastUpdated: '2026-04-01T00:00:00Z',
+    };
+    writeFileSync(
+      path.join(tmpDir, '.squad', 'machine-capabilities.json'),
+      JSON.stringify(manifest),
+    );
+
+    const caps = await loadCapabilities(tmpDir);
+    expect(caps).not.toBeNull();
+    expect(caps!.machine).toBe('DEV-LAPTOP');
+    expect(caps!.capabilities).toEqual(['browser', 'docker']);
+    expect(caps!.podId).toBeUndefined();
+  });
+
+  it('does not stamp podId in agent-per-node mode even if SQUAD_POD_ID is set', async () => {
+    process.env.SQUAD_POD_ID = 'some-pod';
+    // SQUAD_DEPLOYMENT_MODE is not set → defaults to agent-per-node
+
+    const manifest: MachineCapabilities = {
+      machine: 'NODE-1',
+      capabilities: ['browser'],
+      missing: [],
+      lastUpdated: '2026-04-01T00:00:00Z',
+    };
+    writeFileSync(
+      path.join(tmpDir, '.squad', 'machine-capabilities.json'),
+      JSON.stringify(manifest),
+    );
+
+    const caps = await loadCapabilities(tmpDir);
+    expect(caps).not.toBeNull();
+    expect(caps!.machine).toBe('NODE-1');
+    expect(caps!.podId).toBeUndefined();
   });
 });

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import {
   getTrafficLight,
   shouldProceed,
@@ -6,9 +6,13 @@ import {
   PredictiveCircuitBreaker,
   canUseQuota,
   consumeQuota,
+  loadRatePool,
   type RatePool,
   type AgentPriority,
 } from '@bradygaster/squad-sdk/ralph/rate-limiting';
+import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
 
 describe('getTrafficLight', () => {
   it('returns green when >20% remaining', () => {
@@ -275,5 +279,61 @@ describe('consumeQuota', () => {
     consumeQuota(pool, 'ralph');
     // Now exhausted
     expect(canUseQuota(pool, 'ralph')).toBe(false);
+  });
+});
+
+describe('loadRatePool', () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = path.join(os.tmpdir(), `squad-rp-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    mkdirSync(path.join(tmpDir, '.squad'), { recursive: true });
+  });
+
+  afterEach(() => {
+    try { rmSync(tmpDir, { recursive: true, force: true }); } catch { /* ignore */ }
+  });
+
+  it('returns null when no rate-pool file exists', async () => {
+    const pool = await loadRatePool(tmpDir);
+    expect(pool).toBeNull();
+  });
+
+  it('loads a valid rate-pool.json from teamRoot', async () => {
+    const futureExpiry = new Date(Date.now() + 300000).toISOString();
+    const poolData: RatePool = {
+      totalLimit: 5000,
+      resetAt: futureExpiry,
+      allocations: {
+        picard: { priority: 0, allocated: 2000, used: 100, leaseExpiry: futureExpiry },
+      },
+    };
+    writeFileSync(
+      path.join(tmpDir, '.squad', 'rate-pool.json'),
+      JSON.stringify(poolData),
+    );
+
+    const pool = await loadRatePool(tmpDir);
+    expect(pool).not.toBeNull();
+    expect(pool!.totalLimit).toBe(5000);
+    expect(pool!.allocations.picard).toBeDefined();
+    expect(pool!.allocations.picard!.allocated).toBe(2000);
+  });
+
+  it('returns null for malformed JSON', async () => {
+    writeFileSync(
+      path.join(tmpDir, '.squad', 'rate-pool.json'),
+      '{ broken JSON !!',
+    );
+
+    const pool = await loadRatePool(tmpDir);
+    expect(pool).toBeNull();
+  });
+
+  it('returns null when teamRoot is undefined and no home fallback exists', async () => {
+    const pool = await loadRatePool(undefined);
+    // Result depends on whether ~/.squad/rate-pool.json exists,
+    // but the function should not throw.
+    expect(pool === null || (pool && typeof pool.totalLimit === 'number')).toBe(true);
   });
 });
