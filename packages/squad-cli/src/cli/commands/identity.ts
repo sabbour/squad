@@ -313,6 +313,29 @@ async function getAppInstallationId(jwt: string): Promise<number | null> {
   }
 }
 
+/** Simple delay helper. */
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Poll for an app installation ID, retrying every `intervalMs` for up to
+ * `timeoutMs`. Returns the installation ID if found, or null on timeout.
+ */
+async function pollForInstallation(
+  jwt: string,
+  intervalMs: number,
+  timeoutMs: number,
+): Promise<number | null> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const id = await getAppInstallationId(jwt);
+    if (id) return id;
+    await sleep(intervalMs);
+  }
+  return null;
+}
+
 /**
  * Save credentials from the manifest flow to the identity directory.
  */
@@ -441,12 +464,24 @@ async function createAppForRole(
     let installationId = await getAppInstallationId(jwt);
 
     if (!installationId) {
-      console.log(`\n  ${YELLOW}⚠️${RESET}  No installation found for ${appName}.`);
-      console.log(`  Install the app on your repository at:`);
-      console.log(`  ${DIM}https://github.com/settings/apps/${appData.slug}/installations${RESET}`);
-      console.log(`  Then run ${BOLD}squad identity status${RESET} to verify.\n`);
-      // Save with installationId 0 — user will need to update after installing
-      installationId = 0;
+      // Auto-open browser to the app installation page
+      const installUrl = `https://github.com/apps/${appData.slug}/installations/select_target`;
+      console.log(`\n  ${BOLD}Installing app on your repository...${RESET} (confirm in browser)`);
+      openBrowser(installUrl);
+
+      // Poll for the installation to appear (every 2s, up to 60s)
+      installationId = await pollForInstallation(jwt, 2_000, 60_000);
+
+      if (!installationId) {
+        console.log(`\n  ${YELLOW}⚠️${RESET}  No installation detected after 60 seconds.`);
+        console.log(`  You can install the app manually at:`);
+        console.log(`  ${DIM}${installUrl}${RESET}`);
+        console.log(`  Then run ${BOLD}squad identity status${RESET} to verify.\n`);
+        // Save with installationId 0 — user will need to update after installing
+        installationId = 0;
+      } else {
+        console.log(`  ${GREEN}✓${RESET} App installed — installation ID ${installationId}`);
+      }
     }
 
     // Save credentials
