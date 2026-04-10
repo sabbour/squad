@@ -6,6 +6,8 @@
  *   squad identity create --role lead    — create a GitHub App for a single role
  *   squad identity create --all          — create GitHub Apps for all 8 roles
  *   squad identity create --simple       — create a single shared GitHub App
+ *   squad identity rotate --role lead    — open app settings to regenerate key
+ *   squad identity rotate --role lead --import key.pem — import a new PEM key
  *
  * The create flow uses the GitHub App Manifest flow:
  *   1. Generate a manifest JSON describing the app
@@ -19,7 +21,7 @@
  */
 
 import { join } from 'node:path';
-import { existsSync, readdirSync, writeFileSync, mkdirSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { exec, execSync } from 'node:child_process';
 import { platform } from 'node:os';
@@ -29,6 +31,7 @@ import {
   loadAppRegistration,
   saveAppRegistration,
   hasPrivateKey,
+  clearTokenCache,
 } from '@bradygaster/squad-sdk';
 import type { IdentityConfig, IdentityTier, RoleSlug } from '@bradygaster/squad-sdk';
 import { BOLD, RESET, GREEN, DIM, RED, YELLOW } from '../core/output.js';
@@ -560,6 +563,168 @@ async function runCreate(projectRoot: string, args: string[]): Promise<void> {
   }
 }
 
+/**
+ * Rotate the PEM key for a role's GitHub App.
+ *
+ * Without --import: opens the GitHub App settings page so the user can
+ * regenerate the key manually, then re-run with --import.
+ *
+ * With --import <path>: imports the new PEM file and clears the token cache.
+ */
+async function runRotate(projectRoot: string, args: string[]): Promise<void> {
+  const roleIndex = args.indexOf('--role');
+  const roleArg = roleIndex >= 0 ? args[roleIndex + 1] : undefined;
+
+  if (!roleArg) {
+    console.error(`${RED}✗${RESET} --role <role> is required.`);
+    console.log(`  Example: ${DIM}squad identity rotate --role lead${RESET}`);
+    process.exit(1);
+  }
+
+  if (!ALL_ROLES.includes(roleArg as RoleSlug)) {
+    console.error(`${RED}✗${RESET} Unknown role: ${roleArg}`);
+    console.error(`  Valid roles: ${ALL_ROLES.join(', ')}`);
+    process.exit(1);
+  }
+
+  const reg = loadAppRegistration(projectRoot, roleArg);
+  if (!reg) {
+    console.error(
+      `${RED}✗${RESET} No app registered for role '${roleArg}'. ` +
+      `Run ${BOLD}squad identity create --role ${roleArg}${RESET} first.`,
+    );
+    process.exit(1);
+  }
+
+  const importIndex = args.indexOf('--import');
+  const importPath = importIndex >= 0 ? args[importIndex + 1] : undefined;
+
+  if (!importPath) {
+    // No --import flag — open the app settings page for manual key regeneration
+    const settingsUrl = `https://github.com/settings/apps/${reg.appSlug}`;
+    console.log(`\n${BOLD}Rotate key for ${roleArg}${RESET} (app: ${reg.appSlug})\n`);
+    console.log(`  ${DIM}GitHub does not support key rotation via API.${RESET}`);
+    console.log(`  ${DIM}Opening the app settings page — regenerate the private key there.${RESET}\n`);
+    openBrowser(settingsUrl);
+    console.log(`  After downloading the new key, run:`);
+    console.log(`  ${BOLD}squad identity rotate --role ${roleArg} --import path/to/new-key.pem${RESET}\n`);
+    return;
+  }
+
+  // --import mode: validate and import the new PEM file
+  if (!existsSync(importPath)) {
+    console.error(`${RED}✗${RESET} File not found: ${importPath}`);
+    process.exit(1);
+  }
+
+  const pem = readFileSync(importPath, 'utf-8');
+  if (!pem.includes('-----BEGIN') || !pem.includes('PRIVATE KEY-----')) {
+    console.error(`${RED}✗${RESET} File does not look like a PEM private key: ${importPath}`);
+    process.exit(1);
+  }
+
+  // Save the new PEM key
+  const keysDir = join(projectRoot, '.squad', 'identity', 'keys');
+  mkdirSync(keysDir, { recursive: true });
+  writeFileSync(join(keysDir, `${roleArg}.pem`), pem, 'utf-8');
+
+  // Clear cached tokens so the next request uses the new key
+  clearTokenCache();
+
+  console.log(`${GREEN}✅${RESET} Key rotated for ${BOLD}${roleArg}${RESET} (app: ${reg.appSlug})`);
+  console.log(`  ${DIM}New key saved to .squad/identity/keys/${roleArg}.pem${RESET}`);
+  console.log(`  ${DIM}Token cache cleared — next request will use the new key.${RESET}\n`);
+}
+
+// ============================================================================
+// Export credentials as `gh secret set` commands for CI/CD
+// ============================================================================
+
+/**
+ * Export credentials for one role as `gh secret set` commands.
+ * Reads the app registration and PEM from the filesystem and outputs
+ * copy-pasteable commands for injecting them into GitHub Actions secrets.
+ */
+function exportRole(projectRoot: string, roleKey: string): boolean {
+  const reg = loadAppRegistration(projectRoot, roleKey);
+  if (!reg) {
+    console.log(`  ${DIM}${roleKey}${RESET} — ${YELLOW}no app registration${RESET}`);
+    return false;
+  }
+
+  const pemPath = join(projectRoot, '.squad', 'identity', 'keys', `${roleKey}.pem`);
+  if (!existsSync(pemPath)) {
+    console.log(`  ${DIM}${roleKey}${RESET} — ${YELLOW}no private key${RESET}`);
+    return false;
+  }
+
+  let pem: string;
+  try {
+    pem = readFileSync(pemPath, 'utf-8');
+  } catch {
+    console.log(`  ${DIM}${roleKey}${RESET} — ${RED}failed to read key${RESET}`);
+    return false;
+  }
+
+  const envKey = roleKey.toUpperCase();
+  const pemBase64 = Buffer.from(pem).toString('base64');
+
+  console.log(`# ${roleKey}`);
+  console.log(`gh secret set SQUAD_${envKey}_APP_ID --body "${reg.appId}"`);
+  console.log(`gh secret set SQUAD_${envKey}_PRIVATE_KEY --body "${pemBase64}"`);
+  console.log(`gh secret set SQUAD_${envKey}_INSTALLATION_ID --body "${reg.installationId}"`);
+  console.log();
+
+  return true;
+}
+
+function runExport(projectRoot: string, args: string[]): void {
+  const isAll = args.includes('--all');
+  const roleIndex = args.indexOf('--role');
+  const roleArg = roleIndex >= 0 ? args[roleIndex + 1] : undefined;
+
+  if (!isAll && !roleArg) {
+    console.log(`\n${BOLD}squad identity export${RESET} — export credentials as GitHub Actions secrets\n`);
+    console.log(`  ${BOLD}--role <role>${RESET}  Export credentials for a single role`);
+    console.log(`  ${BOLD}--all${RESET}          Export credentials for all registered roles\n`);
+    console.log(`  Example: ${DIM}squad identity export --role backend${RESET}`);
+    console.log(`  Example: ${DIM}squad identity export --all${RESET}\n`);
+    return;
+  }
+
+  if (roleArg) {
+    if (!ALL_ROLES.includes(roleArg as RoleSlug) && roleArg !== 'shared') {
+      console.error(`${RED}✗${RESET} Unknown role: ${roleArg}`);
+      console.error(`  Valid roles: ${ALL_ROLES.join(', ')}, shared`);
+      process.exit(1);
+    }
+    console.log();
+    const ok = exportRole(projectRoot, roleArg);
+    if (ok) {
+      console.log(`${DIM}# Paste the commands above into your terminal to set GitHub Actions secrets.${RESET}\n`);
+    }
+    return;
+  }
+
+  if (isAll) {
+    const config = loadIdentityConfig(projectRoot);
+    const appKeys = Object.keys(config?.apps ?? {});
+    if (appKeys.length === 0) {
+      console.log(`\n${YELLOW}⚠️${RESET}  No app registrations found. Run ${BOLD}squad identity create${RESET} first.\n`);
+      return;
+    }
+
+    console.log();
+    let exported = 0;
+    for (const key of appKeys) {
+      if (exportRole(projectRoot, key)) exported++;
+    }
+    if (exported > 0) {
+      console.log(`${DIM}# Paste the commands above into your terminal to set GitHub Actions secrets.${RESET}\n`);
+    }
+  }
+}
+
 // ============================================================================
 // Entry point
 // ============================================================================
@@ -587,10 +752,33 @@ export async function runIdentity(cwd: string, subArgs: string[]): Promise<void>
     return;
   }
 
+  if (sub === 'rotate') {
+    const projectRoot = resolveSquadDir(cwd);
+    if (!projectRoot) {
+      console.error(`${RED}✗${RESET} No squad found. Run "squad init" first.`);
+      process.exit(1);
+    }
+    await runRotate(projectRoot, subArgs.slice(1));
+    return;
+  }
+
+  if (sub === 'export') {
+    const projectRoot = resolveSquadDir(cwd);
+    if (!projectRoot) {
+      console.error(`${RED}✗${RESET} No squad found. Run "squad init" first.`);
+      process.exit(1);
+    }
+    runExport(projectRoot, subArgs.slice(1));
+    return;
+  }
+
   // No subcommand — show usage
   console.log(`\n${BOLD}squad identity${RESET} — manage agent GitHub App identity\n`);
   console.log(`  ${BOLD}squad identity status${RESET}             — show identity configuration`);
   console.log(`  ${BOLD}squad identity create --role lead${RESET} — create app for a role`);
   console.log(`  ${BOLD}squad identity create --all${RESET}       — create apps for all roles`);
-  console.log(`  ${BOLD}squad identity create --simple${RESET}    — create single shared app\n`);
+  console.log(`  ${BOLD}squad identity create --simple${RESET}    — create single shared app`);
+  console.log(`  ${BOLD}squad identity rotate --role lead${RESET} — rotate key for a role`);
+  console.log(`  ${BOLD}squad identity export --role lead${RESET} — export secrets for CI/CD`);
+  console.log(`  ${BOLD}squad identity export --all${RESET}       — export all secrets for CI/CD\n`);
 }

@@ -129,9 +129,47 @@ export function clearTokenCache(): void {
 // ============================================================================
 
 /**
+ * Attempt to resolve credentials from environment variables.
+ * Convention: SQUAD_{ROLE}_APP_ID, SQUAD_{ROLE}_PRIVATE_KEY, SQUAD_{ROLE}_INSTALLATION_ID.
+ * The private key may be base64-encoded for env var safety; it is decoded automatically
+ * when the value doesn't start with "-----BEGIN".
+ *
+ * @returns Credentials object, or null if any required env var is missing
+ */
+function resolveEnvCredentials(roleKey: string): {
+  appId: number;
+  pem: string;
+  installationId: number;
+} | null {
+  const envKey = roleKey.toUpperCase();
+  const appIdStr = process.env[`SQUAD_${envKey}_APP_ID`];
+  const pemRaw = process.env[`SQUAD_${envKey}_PRIVATE_KEY`];
+  const installIdStr = process.env[`SQUAD_${envKey}_INSTALLATION_ID`];
+
+  if (!appIdStr || !pemRaw || !installIdStr) return null;
+
+  const appId = Number(appIdStr);
+  const installationId = Number(installIdStr);
+  if (!Number.isFinite(appId) || !Number.isFinite(installationId)) return null;
+
+  // Decode base64 PEM if it doesn't already look like a PEM
+  const pem = pemRaw.trimStart().startsWith('-----BEGIN')
+    ? pemRaw
+    : Buffer.from(pemRaw, 'base64').toString('utf-8');
+
+  return { appId, pem, installationId };
+}
+
+/**
  * Get a ready-to-use token for a role's GitHub App.
- * Loads PEM from storage, generates JWT, exchanges for installation token.
- * Caches tokens and refreshes when within 10 minutes of expiry.
+ *
+ * Resolution order:
+ *   1. Cache (if still valid)
+ *   2. Environment variables (SQUAD_{ROLE}_APP_ID / PRIVATE_KEY / INSTALLATION_ID)
+ *   3. Filesystem (`.squad/identity/`)
+ *
+ * Env vars take precedence over filesystem — explicit is better than implicit.
+ * This enables CI/CD workflows to inject credentials via GitHub Actions secrets.
  *
  * @param squadDir - Project root directory (parent of `.squad/`)
  * @param roleKey - Role key (e.g., 'lead', 'backend', or 'shared')
@@ -152,6 +190,16 @@ export async function resolveToken(
     tokenCache.delete(roleKey);
   }
 
+  // --- Path 1: Environment variables (CI/CD override) ---
+  const envCreds = resolveEnvCredentials(roleKey);
+  if (envCreds) {
+    const jwt = await generateAppJWT(envCreds.appId, envCreds.pem);
+    const { token, expiresAt } = await getInstallationToken(jwt, envCreds.installationId);
+    tokenCache.set(roleKey, { token, expiresAt });
+    return token;
+  }
+
+  // --- Path 2: Filesystem (default) ---
   // Load app registration
   const reg = loadAppRegistration(squadDir, roleKey);
   if (!reg) return null;
