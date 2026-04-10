@@ -165,6 +165,8 @@ async function waitForManifestCode(
       // Handle the callback with the code
       const code = url.searchParams.get('code');
       if (code) {
+        const addr = server.address();
+        const port = typeof addr === 'object' && addr ? addr.port : 0;
         res.writeHead(200, { 'Content-Type': 'text/html' });
         res.end(`<!DOCTYPE html>
 <html><head><title>Squad — Success</title></head>
@@ -173,7 +175,7 @@ async function waitForManifestCode(
   <p>You can close this tab and return to the terminal.</p>
 </body></html>`);
         server.close();
-        resolve({ code, port: (server.address() as { port: number }).port });
+        resolve({ code, port });
         return;
       }
 
