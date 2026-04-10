@@ -18,6 +18,9 @@ Three-branch model (main/dev/insiders). Apollo 13 team, 3931 tests. Boundary rev
 
 ## Learnings
 
+### Agent GitHub Identity Architecture (2026-03-27)
+Proposed per-agent GitHub App model for Squad member identity. Key decisions: (1) One App per agent, not shared app — identity is the point; (2) Hybrid fallback — Apps for visible ops, `gh` CLI for assignment/review requests; (3) `SquadGitHubClient.asAgent()` abstraction insulates agent code from auth backend; (4) Credential split — app metadata committed, private keys gitignored, env var overrides for CI; (5) Phased rollout starting with comments + commits. GitHub Apps can't be assignees or requested reviewers — workaround is virtual assignment via labeled comments. Proposal at `docs/proposals/agent-github-identity.md`. Branch: `squad/agent-github-identity`.
+
 ### Issue Filing Patterns (2026-03-23 Release Incident)
 When a major incident occurs, file 9+ GitHub issues documenting root causes and improvements. Pattern: one issue per root cause + one per action item. Use descriptive titles linking to specific improvements (e.g., "#556 Dependency validation in pre-publish checks"). Let team pick up issues in priority order. This accelerates fixes and creates accountability.
 
