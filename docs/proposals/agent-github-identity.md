@@ -30,10 +30,10 @@ Each Squad agent gets its own [GitHub App](https://docs.github.com/en/apps/overv
 
 | Approach | Identity | Cost | Credential scope | Assignment/Review |
 |----------|----------|------|-------------------|-------------------|
-| **One App per agent** ✅ | Distinct `[bot]` per agent | Free | Isolated per agent | ❌ (workaround below) |
-| Machine users | Distinct human-like | Paid seat per agent | Isolated | ✅ native |
-| Single app + attribution | One `[bot]` for all | Free | Shared | ❌ |
-| Personal account (status quo) | Owner's account | Free | Shared, owner-coupled | ✅ native |
+| **One App per agent** ✅ | Distinct `[bot]` per agent | Free | Isolated per agent | Via Squad routing (labels) |
+| Machine users | Distinct human-like | Paid seat per agent | Isolated | ✅ native GitHub UI |
+| Single app + attribution | One `[bot]` for all | Free | Shared | Via Squad routing (labels) |
+| Personal account (status quo) | Owner's account | Free | Shared, owner-coupled | ✅ native GitHub UI |
 
 **Recommendation: One App per agent.** The per-agent identity is the entire point. Machine users cost money and GitHub explicitly recommends Apps over them. A single shared app would be marginally better than today (at least it's a bot badge) but loses per-agent attribution — defeating the purpose.
 
@@ -56,45 +56,37 @@ These GitHub App capabilities map directly to Squad agent operations:
 
 ---
 
-## What Doesn't Work (and Workarounds)
+## GitHub API Gaps (Non-Issues for Squad)
 
-### ❌ Issue Assignment
+GitHub Apps have a few API limitations compared to user accounts. None of these are problems for Squad, because Squad's own routing model is the intended mechanism for assignment and review — not GitHub's native UI primitives.
 
-GitHub Apps cannot be assignees. Only user accounts and org members can be assigned.
+### Issue Assignment — Not Needed
 
-**Workaround — Virtual Assignment Pattern:**
-Keep the existing `squad:flight` label for routing. The agent app comments to claim work:
+GitHub Apps cannot be assignees. But Squad doesn't use GitHub assignment for routing work — it uses `squad:{agent}` labels. The label-based routing IS the assignment mechanism. The agent app comments to signal it's working:
 
 ```
 🏗️ Flight is working on this.
 ```
 
-This is actually *better* than assignment for Squad's model — labels drive routing, comments provide context, and the agent's bot identity makes the claim visually distinct.
+This is *better* than GitHub assignment for Squad's model: labels drive routing, comments provide context, and the agent's `[bot]` identity makes the claim visually distinct.
 
-### ❌ PR Review Requests
+### PR Review Requests — Not Needed
 
-Apps cannot be "requested as reviewers" through the GitHub UI or API.
-
-**Workaround — Proactive Review Pattern:**
-Apps *can* submit full PR reviews (approve, request changes, comment) via the API. They just can't be formally requested. Squad already routes reviews through the coordinator — the app posts its review directly:
+Apps cannot be "requested as reviewers" through the GitHub UI. But Squad routes reviews through its own coordinator, not GitHub's review-request system. Apps *can* submit full PR reviews (approve, request changes, comment) via the API — they just can't appear in the "requested reviewers" sidebar widget.
 
 ```
 POST /repos/{owner}/{repo}/pulls/{pull_number}/reviews
 ```
 
-The review appears with the agent's `[bot]` identity. The only loss is the "requested reviewers" sidebar widget — an acceptable trade-off.
+The review appears with the agent's `[bot]` identity. The sidebar widget is cosmetic; the actual review and its enforcement (required approvals, etc.) work identically.
 
-### ❌ CODEOWNERS
+### CODEOWNERS — Not Needed
 
-Apps can't be listed in CODEOWNERS files (requires users/teams).
+Apps can't be listed in CODEOWNERS files (requires users/teams). CODEOWNERS isn't part of Squad's workflow. If needed later, a GitHub Team proxy can trigger the relevant agent app via webhook.
 
-**Workaround:** CODEOWNERS isn't part of Squad's current workflow. If needed later, use a GitHub Team as a proxy that triggers the relevant agent app via webhook.
+### Team Membership — Not Needed
 
-### ❌ Team Membership
-
-Apps can't join GitHub Teams.
-
-**Impact:** Minimal. Squad uses labels and its own routing, not GitHub Teams.
+Apps can't join GitHub Teams. Squad uses labels and its own routing, not GitHub Teams.
 
 ---
 
@@ -134,12 +126,16 @@ squad identity rotate flight
 App names must be globally unique on GitHub. Convention:
 
 ```
-{agent}-{squad-name}-squad
+{agent}-{user}-squad
 ```
 
-Examples: `flight-kickstart-squad`, `eecom-kickstart-squad`, `leela-kickstart-squad`.
+This scopes each registration to the agent × user pair. The GitHub username provides a natural namespace that avoids collisions between different Squad users.
 
-If the name is taken, the CLI appends a short hash: `flight-kickstart-squad-a1b2`.
+Examples: `flight-sabbour-squad`, `eecom-sabbour-squad`, `leela-sabbour-squad`.
+
+The resulting `[bot]` identities are: `flight-sabbour-squad[bot]`, `eecom-sabbour-squad[bot]`, etc.
+
+If the name is still taken, the CLI appends a short hash: `flight-sabbour-squad-a1b2`.
 
 ### Required Permissions
 
@@ -233,7 +229,7 @@ await octokit.issues.createComment({
   owner, repo, issue_number,
   body: 'Architecture review complete. Approved.'
 });
-// Comment appears as flight-kickstart-squad[bot]
+// Comment appears as flight-sabbour-squad[bot]
 ```
 
 ### Fallback Behavior
@@ -252,13 +248,94 @@ Today Squad uses the `gh` CLI for GitHub operations. The identity system would i
 
 ---
 
+## Scaling & Limits
+
+### Registration vs. Installation Model
+
+GitHub imposes a **hard cap of 100 App registrations per account** — no exceptions.  However, there is **no limit on installations** — a registered app can be installed on unlimited repositories.
+
+This maps cleanly to a three-dimensional scoping model:
+
+| Dimension | Mechanism | Limit |
+|-----------|-----------|-------|
+| **Agent** | Part of app name (`flight-...`) | Per team roster |
+| **User** | Part of app name (`...-sabbour-...`) | Per GitHub user |
+| **Repo** | Installation of the app | Unlimited |
+
+The correct model:
+- **Registration** (counts toward 100): `{agent}-{user}-squad` — scoped to agent × user
+- **Installation** (unlimited): one per repo the agent works on
+
+This means 15 agents = 15 registrations per user. Each can be installed on any number of repos. The `[bot]` identity stays consistent across repos: `flight-sabbour-squad[bot]` looks the same whether it comments on repo A or repo B.
+
+### Concrete Scaling Numbers
+
+| Scenario | Registrations | Status |
+|----------|--------------|--------|
+| 1 user, 15 agents, 1 repo | 15 | ✅ Fine |
+| 1 user, 15 agents, 10 repos | 15 | ✅ Fine (repos = installations, not registrations) |
+| 1 user, 20 agents, 50 repos | 20 | ✅ Fine |
+| 7 users, 15 agents each | 15 per user (105 total) | ✅ Each user has 15 — limit is per-account |
+| 1 user, 100+ agents | 100+ | ❌ Need overflow org |
+
+The per-user scoping means the 100-app limit is effectively per-user, not per-org. Each Squad user registers their own apps under their own GitHub account.
+
+### Overflow Strategy
+
+If a user somehow needs more than 100 agent registrations, they can create "app-hosting organizations" (e.g., `sabbour-squad-apps-1`, `sabbour-squad-apps-2`) and register apps there. Each org gets its own 100-app quota. This is a documented GitHub pattern — unlikely to be needed for Squad but available as an escape hatch.
+
+---
+
+## Developer Onboarding
+
+### The Cloning Story
+
+When a new developer clones a repo with Squad agent identities configured, here's what they get:
+
+**Committed (available immediately):**
+```
+.squad/identity/apps/flight.json    # { appId, installationId, appSlug }
+.squad/identity/apps/eecom.json
+```
+
+**Gitignored (NOT available):**
+```
+.squad/identity/keys/flight.pem     # Private key — never in version control
+.squad/identity/keys/eecom.pem
+```
+
+### Behavior Without Keys
+
+Without private keys, agents **fall back to `gh` CLI auth** — today's behavior. Everything works. The developer can run Squad normally; agents just won't have distinct `[bot]` identities on GitHub.
+
+The `squad identity status` command makes this visible:
+
+```
+$ squad identity status
+  flight    ⚠️ App registered, key missing — using gh CLI fallback
+  eecom     ⚠️ App registered, key missing — using gh CLI fallback
+  leela     ✅ Identity active (flight-sabbour-squad[bot])
+```
+
+### Getting Agent Identities
+
+Developers who want agent identities have three paths:
+
+1. **Shared keys (team secret manager).** The team stores PEM files in a vault (1Password, Azure Key Vault, etc.) and shares access. Developer downloads keys to `.squad/identity/keys/`. Fastest path for existing teams.
+
+2. **Register your own apps.** Run `squad identity create --all` to register a fresh set of apps under your own GitHub account. Each agent gets a new `{agent}-{yourusername}-squad` identity. Independent of the original registrations — each developer "owns" their agents.
+
+3. **CI-only model.** Only CI/CD has the keys (stored as repo secrets). Developers use `gh` CLI fallback locally. Agent identities only appear on CI-generated comments and commits. Simplest to manage — the recommended starting point for most teams.
+
+---
+
 ## Alternative Approaches Considered
 
 ### Machine Users (Rejected)
 
-One GitHub account per agent. Full identity, full API compatibility (assignment, reviews).
+One GitHub account per agent. Full identity, full native GitHub API compatibility (assignment, review requests).
 
-**Why not:** Each account consumes a paid seat. For a team of 10+ agents, that's $40+/month on GitHub Team or $210+/month on Enterprise. GitHub's own docs recommend Apps over machine users. The assignment/review limitations have acceptable workarounds.
+**Why not:** Each account consumes a paid seat. For a team of 10+ agents, that's $40+/month on GitHub Team or $210+/month on Enterprise. GitHub's own docs recommend Apps over machine users. And Squad doesn't need native assignment or review requests — its own label-based routing handles both.
 
 ### Single App with Sub-Identity (Deferred)
 
@@ -268,11 +345,17 @@ One GitHub App for the entire Squad, with agent identity encoded in the comment 
 
 **If sub-identities ship:** Migrate from N apps to 1 app with N sub-identities. The `SquadGitHubClient` abstraction makes this a backend swap — agent code doesn't change.
 
-### Hybrid: Apps for Identity + User Account for Assignment (Recommended for MVP)
+### One App Per Agent Per Repo (Rejected)
 
-Use Apps for all comment/commit/PR operations (identity matters). Use the owner's account (via `gh` CLI) for assignment and review requests (where Apps are limited).
+Register a separate app for each agent × repo combination.
 
-This gives 90% of the identity benefit with zero workarounds for the 10% that Apps can't do.
+**Why not:** This model burns registrations on repos instead of using installations. With 15 agents and 7 repos, that's 105 registrations — already over the 100-app limit. Installations are the correct mechanism for the repo dimension: register once per agent × user, install on as many repos as needed.
+
+### Hybrid: Apps for Identity + User Account for Assignment (No Longer Needed)
+
+Originally considered using the owner's account (via `gh` CLI) for assignment and review requests while Apps handle identity-visible operations.
+
+**Updated assessment:** Squad's label-based routing already handles assignment and review dispatch. There's no need to mix in the owner's account for these operations. The pure App model is cleaner — use Apps for identity-visible operations, and Squad's own routing for everything else.
 
 ---
 
@@ -299,20 +382,21 @@ This gives 90% of the identity benefit with zero workarounds for the 10% that Ap
 - [ ] PR creation/merge under agent identity
 - [ ] Label management under agent identity
 - [ ] Branch operations under agent identity
-- [ ] Hybrid routing: Apps for identity-visible ops, `gh` for assignment/review-request
 - [ ] `squad identity create --all` batch creation
 - [ ] `squad identity rotate <agent>` key rotation
+- [ ] Multi-repo installation support (one app installed on multiple repos via `squad identity install`)
 
 **Ships:** Following minor release.
 
-### Phase 3: CI/CD & Multi-Repo
+### Phase 3: CI/CD & Team Onboarding
 
-**Goal:** Agent identities work in CI and across repositories.
+**Goal:** Agent identities work in CI and across development teams.
 
 - [ ] Environment variable credential override
 - [ ] GitHub Actions integration (agent secrets in repo settings)
-- [ ] Multi-repo installation support (one app installed on multiple repos)
 - [ ] `squad identity export` for CI secret setup
+- [ ] `squad identity status` showing fallback vs. active per agent
+- [ ] Documentation for the three onboarding paths (shared keys, self-registration, CI-only)
 - [ ] Rate limit monitoring per agent
 
 **Ships:** After Phase 2 stabilizes.
@@ -332,19 +416,13 @@ This gives 90% of the identity benefit with zero workarounds for the 10% that Ap
 
 ## Open Questions
 
-1. **Naming collisions.** App names are globally unique on GitHub. What happens when two users both want `flight-squad`? The hash suffix (`flight-squad-a1b2`) works but isn't pretty. Should we use the GitHub username as a namespace (`sabbour-flight-squad`)?
+1. **Avatar strategy.** Each GitHub App can have a custom avatar. Should Squad provide default avatars for agents? Should the avatar match the agent's role (e.g., a space-themed avatar for an Apollo 13 team)?
 
-2. **Org vs. user apps.** For org-owned repos, should apps be registered under the org or the user? Org registration means any org admin can manage them (good for teams). User registration means only the creator manages them (simpler for solo use).
+2. **Webhook events.** GitHub Apps can receive webhooks. Should agent apps listen for events (new issues, PR comments) to enable proactive agent behavior? This is a significant architecture expansion — out of scope for MVP but worth designing the extension point.
 
-3. **Avatar strategy.** Each GitHub App can have a custom avatar. Should Squad provide default avatars for agents? Should the avatar match the agent's role (e.g., a space-themed avatar for an Apollo 13 team)?
+3. **Existing `gh-auth-isolation` skill.** Squad already has a skill for managing multiple GitHub identities via `gh auth`. Should the identity system build on this, or is the App-based approach a clean replacement? Recommendation: they serve different purposes — `gh-auth-isolation` handles human multi-account; `squad identity` handles agent identity. Both coexist.
 
-4. **Key storage for teams.** In a multi-developer Squad setup, how do team members share access to agent identities? Options: shared secret manager, each dev registers their own app set, or a "Squad identity server" that issues tokens.
-
-5. **Webhook events.** GitHub Apps can receive webhooks. Should agent apps listen for events (new issues, PR comments) to enable proactive agent behavior? This is a significant architecture expansion — out of scope for MVP but worth designing the extension point.
-
-6. **Existing `gh-auth-isolation` skill.** Squad already has a skill for managing multiple GitHub identities via `gh auth`. Should the identity system build on this, or is the App-based approach a clean replacement? Recommendation: they serve different purposes — `gh-auth-isolation` handles human multi-account; `squad identity` handles agent identity. Both coexist.
-
-7. **Sub-identity timeline.** GitHub community is requesting sub-identity support for Apps. If it ships within 6 months, should we wait? **Recommendation: No.** Build the per-app model now. The `SquadGitHubClient` abstraction means migrating to sub-identities later is a backend swap, not a rewrite.
+4. **Sub-identity timeline.** GitHub community is requesting sub-identity support for Apps. If it ships within 6 months, should we wait? **Recommendation: No.** Build the per-app model now. The `SquadGitHubClient` abstraction means migrating to sub-identities later is a backend swap, not a rewrite.
 
 ---
 
@@ -352,7 +430,7 @@ This gives 90% of the identity benefit with zero workarounds for the 10% that Ap
 
 **Build the per-agent GitHub App model, phased starting with MVP (comments + commits).** The abstraction layer (`SquadGitHubClient.asAgent()`) insulates agent code from the identity backend, so future changes (sub-identities, different providers) don't cascade.
 
-The hybrid approach (Apps for visible operations, `gh` CLI fallback for assignment/review) gives immediate value without waiting for GitHub to close capability gaps.
+Squad's label-based routing handles assignment and review dispatch — there's no need for a hybrid approach mixing Apps with the owner's account. Apps provide identity for visible operations; Squad's own routing handles everything else. The registration-per-agent, installation-per-repo model keeps well within GitHub's 100-app limit for any realistic team size.
 
 This is a compounding decision: once agents have their own identity, every future feature (proactive triage, automated reviews, multi-repo coordination) gets built on a clean attribution foundation.
 
