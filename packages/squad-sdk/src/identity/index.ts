@@ -30,3 +30,10 @@ export {
   formatComment,
   formatCommitMessage,
 } from './formatting.js';
+
+export {
+  generateAppJWT,
+  getInstallationToken,
+  resolveToken,
+  clearTokenCache,
+} from './tokens.js';
