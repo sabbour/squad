@@ -133,7 +133,7 @@ function buildManifest(appName: string, username: string, callbackUrl: string): 
  * Returns the code from the callback.
  */
 async function waitForManifestCode(
-  manifest: object,
+  manifestTemplate: object,
 ): Promise<{ code: string; port: number }> {
   return new Promise((resolve, reject) => {
     const server = createServer((req, res) => {
@@ -141,6 +141,11 @@ async function waitForManifestCode(
 
       // Serve the auto-submitting form page at /
       if (url.pathname === '/' && !url.searchParams.has('code')) {
+        // Now we know the port — patch the manifest with the real callback URL
+        const addr = server.address();
+        const port = typeof addr === 'object' && addr ? addr.port : 0;
+        const realCallbackUrl = `http://localhost:${port}`;
+        const manifest = { ...manifestTemplate, redirect_url: realCallbackUrl };
         const manifestJson = JSON.stringify(manifest);
         res.writeHead(200, { 'Content-Type': 'text/html' });
         res.end(`<!DOCTYPE html>
