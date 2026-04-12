@@ -205,7 +205,7 @@ export function reportBoard(state: BoardState, round: number, options?: ReportBo
   if (level === 'important' && total === 0) return;
 
   if (total === 0) {
-    console.log(`${DIM}📋 Board is clear — Ralph is idling${RESET}`);
+    console.log(`${DIM}📋 Board is clear — monitoring for new work${RESET}`);
     return;
   }
   const suffix = options?.machineName || options?.repoName

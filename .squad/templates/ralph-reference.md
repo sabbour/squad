@@ -9,8 +9,8 @@ Ralph runs the same cycle at every wake-up (in-session, watch mode, or heartbeat
 3. **Dispatch** — For untriaged items, read `.squad/routing.md` and triage using: module path match → routing rule keywords → role keywords → Lead fallback. Assign `squad:{member}` label and spawn agent if not already assigned
 4. **Watch** — For in-flight items (assigned, inProgress, needsReview), check for state changes (PR created, review feedback, CI status, approval)
 5. **Report** — Log results to the user (items moved, agents spawned, board state)
-6. **Board Clear Check** — If all items are done/merged, go idle
-7. **Loop** — If work remains, go back to step 1
+6. **Board Clear Check** — If all items are done/merged, report status and continue monitoring
+7. **Loop** — Go back to step 1 (whether or not work remains)
 
 ## Board Format
 
@@ -36,18 +36,20 @@ done         → Remove from board
 - `reviewDecision` — `CHANGES_REQUESTED` or `APPROVED`
 - `statusCheckRollup` — check states like `FAILURE`, `ERROR`, or `PENDING`
 
-## Idle-Watch Mode
+## Continuous Monitoring Mode
 
-When the board is clear (all work done/merged), Ralph enters **idle mode**. In this state:
-- In-session Ralph stops the active loop (agents can still be called manually)
-- Watch mode Ralph pauses polling until next interval
+When the board is clear (all work done/merged), Ralph does NOT stop. Ralph continues monitoring:
+- In-session Ralph waits the configured poll interval, then scans again for new work
+- Watch mode Ralph continues polling at the configured interval
 - Heartbeat Ralph waits for next event trigger (cron permanently disabled)
 
-Ralph wakes from idle when:
-- New issue is created with `squad` label
-- PR is opened by a squad agent
-- Existing issue is reopened
-- Manual activation via "Ralph, go" or `squad watch`
+New work can arrive at any time (humans creating issues, external automation, CI events). Ralph catches it on the next scan cycle.
+
+Ralph only stops when:
+- User explicitly says "Ralph, idle" or "stop"
+- The Copilot CLI session ends
+- The watch process is terminated (Ctrl+C)
+- Manual activation via "Ralph, go" or `squad watch` restarts monitoring
 
 ## Activation Triggers
 
@@ -68,7 +70,8 @@ Ralph wakes from idle when:
 ## Work-Check Termination
 
 Ralph stops checking when:
-1. Board is clear (all items done)
-2. User says "Ralph, idle" or "stop"
-3. Session ends (in-session layer only)
-4. Process killed (watch mode)
+1. User says "Ralph, idle" or "stop"
+2. Session ends (in-session layer only)
+3. Process killed (watch mode)
+
+**A clear board does NOT stop Ralph.** Ralph continues monitoring for new work.

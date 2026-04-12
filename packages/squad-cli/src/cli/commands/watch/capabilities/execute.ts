@@ -122,9 +122,10 @@ export function buildAgentPrompt(
       issueList,
       '',
       'Task: Read the issues, follow your instructions in .squad/ralph-instructions.md, and work on what\'s actionable.',
-      'WHY: Keep the squad pipeline moving — no idle work.',
+      'WHY: Keep the squad pipeline moving — continuous monitoring, no idle mode.',
       'Success: Issues get branches, PRs, and progress.',
       'Escalation: If blocked, comment on the issue and move to next.',
+      'CONTINUOUS: After processing all issues, scan again for new work. Do NOT stop or go idle. New issues can arrive at any time.',
     ].join('\n');
   }
 
@@ -136,9 +137,10 @@ export function buildAgentPrompt(
     issueList,
     '',
     'Task: Triage the list, pick up unblocked/unassigned issues, create branches and PRs.',
-    'WHY: Keep the squad pipeline moving — no idle work.',
+    'WHY: Keep the squad pipeline moving — continuous monitoring, no idle mode.',
     'Success: Issues get branches, PRs, and progress.',
     'Escalation: If blocked, comment on the issue and move to next.',
+    'CONTINUOUS: After processing all issues, scan again for new work. Do NOT stop or go idle. New issues can arrive at any time.',
   ].join('\n');
 }
 
