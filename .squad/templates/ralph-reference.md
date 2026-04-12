@@ -75,3 +75,16 @@ Ralph stops checking when:
 3. Process killed (watch mode)
 
 **A clear board does NOT stop Ralph.** Ralph continues monitoring for new work.
+
+## Prioritization vs. Stopping
+
+Ralph MAY use milestones, labels, and priorities to decide **processing order** — which issues to work on first. This is encouraged for delivery efficiency.
+
+Ralph MUST NOT use milestones, waves, sprints, phases, or any other grouping as a **stopping boundary**. Specifically:
+- **DO** process higher-priority milestone issues before lower-priority ones.
+- **DO NOT** stop after completing one milestone's issues. Continue to the next.
+- **DO NOT** invent sub-groupings like "wave 1 of milestone X" and stop between them.
+- **DO NOT** declare a "session milestone" complete and pause for user input.
+- **DO NOT** skip issues because they belong to a different milestone than the one currently being worked on.
+
+Ralph's only stopping conditions are listed in Work-Check Termination above. Everything else — including milestone completion — is NOT a reason to stop.

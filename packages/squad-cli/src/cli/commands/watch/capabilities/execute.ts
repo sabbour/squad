@@ -126,6 +126,7 @@ export function buildAgentPrompt(
       'Success: Issues get branches, PRs, and progress.',
       'Escalation: If blocked, comment on the issue and move to next.',
       'CONTINUOUS: After processing all issues, scan again for new work. Do NOT stop or go idle. New issues can arrive at any time.',
+      'PRIORITY: You MAY use milestones and labels to decide processing ORDER, but NEVER use them as stopping boundaries. Process ALL open issues across ALL milestones. Do NOT invent "waves" or stop between groups.',
     ].join('\n');
   }
 
@@ -141,6 +142,7 @@ export function buildAgentPrompt(
     'Success: Issues get branches, PRs, and progress.',
     'Escalation: If blocked, comment on the issue and move to next.',
     'CONTINUOUS: After processing all issues, scan again for new work. Do NOT stop or go idle. New issues can arrive at any time.',
+    'PRIORITY: You MAY use milestones and labels to decide processing ORDER, but NEVER use them as stopping boundaries. Process ALL open issues across ALL milestones. Do NOT invent "waves" or stop between groups.',
   ].join('\n');
 }
 
