@@ -515,7 +515,21 @@ async function resolveInstallationForExistingApp(
   }
 
   clearTokenCache();
-  console.log(`${GREEN}✅${RESET} Installation resolved for ${BOLD}${key}${RESET} → ${installationId}\n`);
+  console.log(`${GREEN}✅${RESET} Installation resolved for ${BOLD}${key}${RESET} → ${installationId}`);
+
+  // Verify the identity works end-to-end: resolve a token
+  try {
+    const { resolveToken } = await import('@bradygaster/squad-sdk');
+    const token = await resolveToken(projectRoot, key);
+    if (token) {
+      console.log(`  ${GREEN}✓${RESET} Token verified — identity is working\n`);
+    } else {
+      console.log(`  ${YELLOW}⚠${RESET} Installation saved but token resolution returned null\n`);
+    }
+  } catch {
+    console.log(`  ${YELLOW}⚠${RESET} Installation saved but token verification failed (non-fatal)\n`);
+  }
+
   return true;
 }
 
@@ -658,6 +672,20 @@ async function createAppForRole(
     saveCredentials(projectRoot, key, appData, installationId, tier, roleSlug);
 
     console.log(`${GREEN}✅${RESET} Created ${BOLD}${appName}${RESET} — app ID ${appData.id}`);
+
+    // Verify token works
+    try {
+      clearTokenCache();
+      const { resolveToken } = await import('@bradygaster/squad-sdk');
+      const token = await resolveToken(projectRoot, key);
+      if (token) {
+        console.log(`  ${GREEN}✓${RESET} Token verified — identity is working`);
+      } else {
+        console.log(`  ${YELLOW}⚠${RESET} App created but token resolution returned null`);
+      }
+    } catch {
+      console.log(`  ${YELLOW}⚠${RESET} App created but token verification failed (non-fatal)`);
+    }
 
     // Avatar upload instructions (GitHub API doesn't support programmatic logo upload)
     const avatarSlug = roleSlug ?? 'lead';
