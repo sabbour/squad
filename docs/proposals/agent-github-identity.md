@@ -738,20 +738,11 @@ Two paths:
 
 ## Copilot CLI Integration (Implemented)
 
-When spawned agents perform git operations, Squad injects identity context via **identity blocks** in the spawn prompt. This is where identity becomes transparent to agents — they just use standard git commands.
+### How It Works — The Big Picture
 
-### GIT IDENTITY Block in Spawn Prompts
+Squad's coordinator (`squad.agent.md`) automatically detects identity configuration at spawn time. When `.squad/identity/config.json` exists, identity blocks are injected into the agent's spawn prompt — agents don't need to know about identity, it's entirely environment-level. The system is gracefully degraded: if anything fails (missing config, key read error, GitHub API timeout), agents silently fall back to default git auth. No spawn is ever blocked.
 
-The spawn system (`.github/agents/squad.agent.md`) includes a **GIT IDENTITY block** that is:
-- **Conditional:** Only included if `.squad/identity/config.json` exists
-- **Role-aware:** Uses the agent's role to select the right app
-- **Automatic:** Agents don't explicitly request it — it's part of the spawn environment
-
-The block provides:
-1. **Token resolution snippet:** Node.js one-liner to get a fresh installation token
-2. **Git config:** `user.name` and `user.email` set to bot identity
-3. **Push URLs:** `https://x-access-token:${TOKEN}@github.com/...` for authentication
-4. **PR body template:** Includes the GitHub App link for attribution
+After PR merge and release, Squad-powered repos get identity support via two one-time commands: `squad upgrade` (deploys the identity-aware coordinator prompt) and `squad identity create` (browser-based app setup). The `create` command auto-detects roles from `team.md`, creates GitHub Apps with the right names and permissions, and saves app registrations and keys to `.squad/identity/`.
 
 ### Pre-Spawn: Identity Resolution
 
@@ -776,21 +767,24 @@ Before spawning an agent, the coordinator:
 
 ### Token Resolution at Runtime
 
-The GIT IDENTITY block instructs agents to resolve a token at git operation time:
+The GIT IDENTITY block instructs agents to resolve a token at git operation time. This is done with a Node.js ESM one-liner:
 
-```javascript
-const {resolveToken, clearTokenCache} = require(
-  '{team_root}/packages/squad-sdk/dist/identity/tokens.js'
-);
-clearTokenCache();
-resolveToken('{team_root}', '{role_slug}').then(token => {
-  if (token) process.stdout.write(token);
-  else process.exit(1);
-});
+```bash
+TOKEN=$(node --input-type=module -e "import{pathToFileURL}from'node:url';const{resolveToken,clearTokenCache}=await import(pathToFileURL('{team_root}/packages/squad-sdk/dist/identity/tokens.js').href);clearTokenCache();const t=await resolveToken('{team_root}','{role_slug}');if(t)process.stdout.write(t)")
 ```
 
-This:
-- Loads the app registration for the role slug
+Note: **No `process.exit(1)` on failure**. If token resolution fails, `TOKEN` is left empty. Git and gh commands then use a conditional:
+
+```bash
+if [ -n "$TOKEN" ]; then 
+  git push https://x-access-token:${TOKEN}@github.com/{owner}/{repo}.git {branch}
+else 
+  git push
+fi
+```
+
+The token resolution process:
+- Loads the app registration for the role slug from `.squad/identity/config.json`
 - Reads the PEM key from `.squad/identity/keys/{role_slug}.pem`
 - Generates a fresh JWT (RS256 signed, 9-minute expiry)
 - Exchanges it for an installation token via GitHub API
@@ -807,25 +801,80 @@ If identity resolution fails at any point:
 - GitHub API error
 - Any other exception
 
-The agent **silently falls back to default git auth** and continues. No spawn is ever blocked because of identity. This preserves reliability.
+The `TOKEN` variable is left empty, and the agent's conditional push/PR commands automatically fall back to default git auth (or fail gracefully). No spawn is ever blocked because of identity. This preserves reliability.
 
-### Example: Commit and Push with Identity
+### Multi-Repo Usage
 
+GitHub App names are globally unique. A single app can be installed on multiple repos, eliminating the need to create separate apps for each project.
+
+**First repo:** Run `squad identity create` to trigger the browser-based GitHub Apps manifest flow. The CLI guides you through app creation and installation.
+
+**Additional repos in the same GitHub organization:** Run `squad identity create --import /path/to/first-repo` to import the PEM keys and app registrations from the first repo. This avoids recreating apps and ensures consistency across all projects.
+
+**Interactive menu prevents dead-ends:** Before creating an app, the CLI prompts you to choose: (1) Create new apps, or (2) Import from another Squad repo. This prevents the "name already taken" error that would occur if you tried to create a duplicate app name through the browser manifest.
+
+**All create flags work with `--import`:**
+- `squad identity create --import /path --role lead` — import and create app for lead role only
+- `squad identity create --import /path --all` — import and create all team roles
+- `squad identity create --import /path` (no flags) — auto-detect from team.md and import
+
+### CLI Commands
+
+| Command | What it does |
+|---------|-------------|
+| `squad identity status` | Show configured apps and installation status |
+| `squad identity create` | Auto-detect roles from team.md, create apps |
+| `squad identity create --role lead` | Create app for a single role |
+| `squad identity create --import /path` | Import identity from another Squad repo |
+| `squad identity update --role lead` | Re-detect installation ID |
+| `squad identity rotate --role lead` | Rotate PEM key |
+| `squad identity export` | Export secrets for CI/CD |
+
+### Example: End-to-End Flow
+
+First repo setup:
+```bash
+cd /path/to/first-squad-repo
+squad identity create                    # Browser flow: create apps, install on repo
+squad identity status                    # Verify: show app registrations
+```
+
+Then, deploy the identity-aware coordinator:
+```bash
+squad upgrade                            # Deploy latest squad.agent.md with identity block
+```
+
+Now, when an agent pushes, it uses the identity-resolved token:
 ```bash
 # Inside spawned agent (GIT IDENTITY block provided by coordinator)
-TOKEN=$(node -e "const{resolveToken}=require('{team_root}/packages/squad-sdk/dist/identity/tokens.js');resolveToken('{team_root}','lead').then(t=>{if(t)process.stdout.write(t)})")
+TOKEN=$(node --input-type=module -e "import{pathToFileURL}from'node:url';const{resolveToken,clearTokenCache}=await import(pathToFileURL('{team_root}/packages/squad-sdk/dist/identity/tokens.js').href);clearTokenCache();const t=await resolveToken('{team_root}','lead');if(t)process.stdout.write(t)")
 
 git -c user.name="sabbour-squad-lead[bot]" \
     -c user.email="sabbour-squad-lead[bot]@users.noreply.github.com" \
     commit -m "[Flight] refactor: extract module"
 
-git push https://x-access-token:${TOKEN}@github.com/bradygaster/squad.git feature-branch
+if [ -n "$TOKEN" ]; then
+  git push https://x-access-token:${TOKEN}@github.com/bradygaster/squad.git feature-branch
+else
+  git push
+fi
 
-# PR creation includes: "🤖 Created by [sabbour-squad-lead](https://github.com/apps/sabbour-squad-lead)"
-GH_TOKEN=$TOKEN gh pr create --title "..." --body "...\n\n🤖 Created by [sabbour-squad-lead](https://github.com/apps/sabbour-squad-lead)"
+# PR creation with bot attribution
+if [ -n "$TOKEN" ]; then
+  GH_TOKEN=$TOKEN gh pr create --title "..." --body "...\n\n🤖 Created by [sabbour-squad-lead](https://github.com/apps/sabbour-squad-lead)"
+else
+  gh pr create --title "..." --body "..."
+fi
 ```
 
-The agent sees no special identity logic — just standard git + gh CLI commands. Squad's environment (the GIT IDENTITY block) handles everything.
+To add identity to a second repo in the same organization:
+```bash
+cd /path/to/second-squad-repo
+squad identity create --import /path/to/first-squad-repo  # Import apps, no browser flow needed
+squad upgrade                                              # Deploy coordinator with identity block
+```
+
+The agent sees no special identity logic — just standard git + gh CLI commands with environment-level graceful fallback. Squad's coordinator handles all authentication complexity.
 
 ---
 
