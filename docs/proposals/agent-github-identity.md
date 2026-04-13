@@ -1062,7 +1062,25 @@ squad identity create
 
 This reads your `team.md`, detects roles, and creates GitHub Apps for each. A browser window opens per app — install it on this repo and wait for polling.
 
-You can also create a single role: `squad identity create --role lead`
+The `squad identity create` command now shows an interactive menu per role:
+
+```
+  App name: sabbour-squad-lead
+  (1) Create new app (opens browser)
+  (2) Already exists — import from another repo
+  (3) Already exists — just install on this repo (opens browser)
+  Or type a custom app name
+```
+
+If you already created the app in another repo, choose option 2 and provide the path to that repo. The CLI copies the PEM key and app registration, then prompts you to install the app on the current repo.
+
+You can also use `--import` directly:
+
+```bash
+squad identity create --import /path/to/source-repo
+```
+
+Or create a single role: `squad identity create --role lead`
 
 **Step 4 — Verify:**
 
@@ -1095,3 +1113,45 @@ cd /path/to/other-repo
 npm unlink @bradygaster/squad-cli @bradygaster/squad-sdk
 gh pr list --state open   # close any test PRs
 ```
+
+### E. Multi-Repo Usage
+
+GitHub Apps are globally unique names — one app can be installed on multiple repos. This enables squad teams to reuse the same identity across multiple project repositories without creating separate apps.
+
+**First repository:**
+
+Run `squad identity create` normally. The CLI opens a browser manifest flow to create the app on GitHub:
+
+```bash
+cd /path/to/first-repo
+squad identity create
+```
+
+The app is created via browser and installed on this repo. The PEM key and app registration are stored in `.squad/identity/`.
+
+**Additional repositories:**
+
+For any other repo with Squad, reuse the identity by importing from the first repo:
+
+```bash
+cd /path/to/second-repo
+squad identity create --import /path/to/first-repo
+```
+
+The CLI copies the PEM key and app registration from the first repo, then prompts you to install the app on the current repo (opens browser).
+
+**Integration with create flags:**
+
+The `--import` flag works with `--role`, team auto-detection, and all other create flags:
+
+```bash
+# Import and create only the lead role
+squad identity create --import /path/to/first-repo --role lead
+
+# Import and detect all roles from team.md
+squad identity create --import /path/to/first-repo
+```
+
+**Why no direct API:**
+
+GitHub has no API to create apps without a browser or pre-check name availability. This is a security feature — app names must be validated in real time via the GitHub UI. The interactive menu and `--import` flag provide a UX shortcut for the common multi-repo case without requiring manual browser workflows for each repo.

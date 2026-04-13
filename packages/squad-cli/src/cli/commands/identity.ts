@@ -603,28 +603,19 @@ async function createAppForRole(
   // before opening the browser (avoids the "name already taken" dead end).
   console.log(`\n  App name: ${BOLD}${appName}${RESET}`);
   console.log(`  ${DIM}(1)${RESET} Create new app ${DIM}(opens browser)${RESET}`);
-  console.log(`  ${DIM}(2)${RESET} Already exists — import from another repo`);
-  console.log(`  ${DIM}(3)${RESET} Already exists — just install on this repo ${DIM}(opens browser)${RESET}`);
+  console.log(`  ${DIM}(2)${RESET} Already exists — reuse from another repo`);
   console.log(`  Or type a custom app name`);
   const choice = await ask(`\n  Choice [1]: `);
 
-  if (choice === '2') {
+  if (choice === '2' || choice === '3') {
     const sourcePath = await ask(
       `  Path to repo with existing identity (has .squad/identity/): `,
     );
-    if (sourcePath && existsSync(join(sourcePath, '.squad', 'identity'))) {
-      return importAppCredentials(sourcePath, projectRoot, key, tier, roleSlug);
+    if (!sourcePath || !existsSync(join(sourcePath, '.squad', 'identity'))) {
+      console.log(`\n  ${RED}✗${RESET} No identity config found at that path.`);
+      return false;
     }
-    console.log(`\n  ${RED}✗${RESET} No identity config found at that path.`);
-    return false;
-  } else if (choice === '3') {
-    // Open the installation page for the existing app
-    const installUrl = `https://github.com/apps/${appName}/installations/select_target`;
-    console.log(`\n  Opening: ${DIM}${installUrl}${RESET}`);
-    openBrowser(installUrl);
-    console.log(`\n  After installing, import the credentials:`);
-    console.log(`  ${BOLD}squad identity create --import /path/to/repo-with-existing-identity${RESET}\n`);
-    return false;
+    return importAppCredentials(sourcePath, projectRoot, key, tier, roleSlug);
   } else if (choice && choice !== '1' && choice.length > 0) {
     appName = choice;
     console.log(`  Using custom name: ${BOLD}${appName}${RESET}`);
