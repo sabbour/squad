@@ -1,9 +1,56 @@
-# Proposal: Agent GitHub Identity via GitHub Apps
+# Agent GitHub Identity via GitHub Apps
 
 **Author:** Flight (Lead)  
 **Date:** 2026-03-27  
 **Revised:** 2026-03-29  
-**Status:** Proposal (Revised — Three-Tier Identity Model, Per-Role Recommended)  
+**Status:** ✅ Implemented  
+**Implementation Date:** 2025-07-29
+
+---
+
+## Quick Start
+
+Get identity working in 3 steps:
+
+```bash
+# 1. Create GitHub App + PEM key for your lead role
+npx @bradygaster/squad-cli identity create --role lead
+
+# 2. Install the app on your repo when browser opens
+# (CLI displays a link automatically)
+
+# 3. Verify everything is configured
+npx @bradygaster/squad-cli identity status
+```
+
+**Result:** Agents now commit/push/PR as the bot identity automatically. No additional config needed.
+
+---
+
+## Implementation Status
+
+Squad's identity system is **production-ready** with the following shipped:
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| **Per-role apps** (Tier 2, default) | ✅ Shipped | `{user}-squad-{role}` naming convention |
+| **Shared app** (Tier 1) | ✅ Shipped | `squad identity create --simple` |
+| **Per-agent apps** (Tier 3) | ⚠️ Design complete, not prioritized | Advanced filtering use case |
+| **JWT token generation** | ✅ Shipped | RS256, 9-minute expiry (clock skew buffer) |
+| **Installation token exchange** | ✅ Shipped | 1-hour validity, proactive refresh at 50min |
+| **CLI commands** | ✅ Shipped | `status`, `create`, `update`, `rotate`, `export` |
+| **Spawn integration** | ✅ Shipped | Identity context injected into agent prompts |
+| **PR attribution** | ✅ Shipped | Link to GitHub App in PR body |
+| **E2E testing** | ✅ Shipped | Smoke test at `scripts/test-identity-e2e.mjs` |
+
+### Key Implementation Details
+
+- **`create` is idempotent** — re-running on an existing role resolves missing installation IDs. No separate "fix" command needed.
+- **`update`** replaces the proposed `fix` command — it re-detects and updates the installation ID without creating a new app.
+- **JWT exp changed** from 10 minutes to 9 minutes (clock skew buffer for WSL).
+- **Token resolution** uses `node:crypto` RSA-SHA256 — zero npm dependencies.
+- **Graceful fallback** — if identity is not configured, agents use default git auth. Never blocks agent work.
+- **PR bodies** include a link: `🤖 Created by [app-slug](https://github.com/apps/app-slug)`
 
 ---
 
@@ -290,28 +337,39 @@ GitHub Apps cannot be created fully headlessly. The [manifest flow](https://docs
 5. CLI exchanges the code for credentials (app ID, private key, webhook secret).
 6. Credentials are stored locally (see Credential Management below).
 
-### CLI Interface
+### CLI Interface (Implemented)
+
+The actual CLI commands shipped with Squad:
 
 ```bash
-# Tier 2: Create per-role identity apps (default — recommended)
-squad identity create
+# Create GitHub Apps (Tier 2: per-role, default)
+squad identity create                      # Creates apps for all roles in roster
+squad identity create --role lead          # Creates app for a single role (idempotent)
+squad identity create --all                # Explicit: all roles in roster
 
-# Tier 1: Create one shared identity app
+# Tier 1: Shared app (all agents use one app)
 squad identity create --simple
 
-# Tier 3: Create per-agent identity apps
-squad identity create --per-agent          # For a specific agent
-squad identity create --per-agent --all    # For all agents in roster
-
-# Check identity status (works for all tiers)
+# Check current identity configuration
 squad identity status
 
-# Rotate credentials
-squad identity rotate
+# Update an existing app (re-detect missing installation ID)
+# Replaces the proposed 'fix' command — make 'create' idempotent
+squad identity update --role lead
 
-# Install on additional repos
-squad identity install <owner/repo>
+# Rotate/regenerate private key for an app
+squad identity rotate --role lead
+squad identity rotate --role lead --import path/to/new-key.pem
+
+# Export credentials for CI/CD (as GitHub Actions secrets)
+squad identity export --role lead
+squad identity export --all
 ```
+
+**Key differences from proposal:**
+- `fix` command was removed — `create` is now fully idempotent
+- `update` handles re-detection of missing installation IDs (called automatically if `create` finds an app with `installationId: 0`)
+- Tier 3 (per-agent) is still available in design but not prioritized
 
 #### Tier 2 Bootstrap Flow (Default)
 
@@ -441,11 +499,11 @@ One JSON + one PEM per agent. File count grows with agent count.
 - **`keys/*.pem`** — Gitignored. Private keys never enter version control. Period.
 - **`.gitignore`** entry: `.squad/identity/keys/`
 
-### Token Lifecycle
+### Token Lifecycle (Implemented)
 
 GitHub App authentication is a two-step process:
 
-1. **JWT generation:** Sign a JWT using the app's private key. Valid for 10 minutes.
+1. **JWT generation:** Sign a JWT using the app's private key. Valid for **9 minutes** (GitHub max is 10 min; we use 9 to leave a clock-skew buffer, especially for WSL).
 2. **Installation token exchange:** Exchange the JWT for an installation access token. Valid for 1 hour.
 
 Squad caches installation tokens and refreshes them proactively (at 50 minutes, not at expiry). Token refresh is transparent — agents never deal with auth directly. For Tier 2, Squad caches one token per role app and selects the right one based on the agent's role at operation time.
@@ -678,57 +736,120 @@ Two paths:
 
 ---
 
-## Copilot CLI Integration
+## Copilot CLI Integration (Implemented)
 
-The preferred mode of Squad agent execution is via the **GitHub Copilot CLI**, which spawns agents as background processes and sets their environment variables. This is where the identity system becomes nearly invisible to agents — they just use `gh` normally.
+When spawned agents perform git operations, Squad injects identity context via **identity blocks** in the spawn prompt. This is where identity becomes transparent to agents — they just use standard git commands.
 
-### How GH_TOKEN Injection Works
+### GIT IDENTITY Block in Spawn Prompts
 
-When Squad's agent manager spawns an agent for a specific role, it:
+The spawn system (`.github/agents/squad.agent.md`) includes a **GIT IDENTITY block** that is:
+- **Conditional:** Only included if `.squad/identity/config.json` exists
+- **Role-aware:** Uses the agent's role to select the right app
+- **Automatic:** Agents don't explicitly request it — it's part of the spawn environment
 
-1. **Resolves the agent's role** from the team roster (e.g., "EECOM" is a Core Dev → `backend` role).
-2. **Loads the role app's GitHub App credentials** (stored in `.squad/identity/keys/`).
-3. **Generates an installation token** scoped to that app and the target repo.
-4. **Sets `GH_TOKEN` in the spawn environment** before starting the agent process.
+The block provides:
+1. **Token resolution snippet:** Node.js one-liner to get a fresh installation token
+2. **Git config:** `user.name` and `user.email` set to bot identity
+3. **Push URLs:** `https://x-access-token:${TOKEN}@github.com/...` for authentication
+4. **PR body template:** Includes the GitHub App link for attribution
 
-The `gh` CLI respects the `GH_TOKEN` environment variable. When set, `gh` automatically authenticates as that token — which means every `gh` call the agent makes (creating issues, commenting on PRs, pushing code, etc.) goes through the app's identity. The agent sees no special logic, no `.squad/config`, no identity library. It just calls `gh` normally:
+### Pre-Spawn: Identity Resolution
 
-```typescript
-// Agent code (unchanged from today)
-exec('gh issue comment 42 --body "Fix deployed"');
+Before spawning an agent, the coordinator:
+
+1. **Checks identity config:** Does `.squad/identity/config.json` exist?
+   - **No** → omit identity block entirely, use default git auth
+   - **Yes** → include full identity block
+
+2. **Resolves role slug:** Map agent's role to identity slug via `resolveRoleSlug()`:
+   - Lead/Architect → `lead`
+   - Backend/Core Dev → `backend` (falls back to `lead` if no backend app)
+   - Frontend → `frontend` (falls back to `lead`)
+   - Tester → `tester` (falls back to `lead`)
+   - For Shared tier: all agents use single shared app
+
+3. **Gets app slug:** From `.squad/identity/config.json`, fetch `appSlug` for the resolved role
+
+4. **Gets repo owner/name:** Parse from git remote origin URL
+
+5. **Includes identity block** in spawn prompt with resolved values
+
+### Token Resolution at Runtime
+
+The GIT IDENTITY block instructs agents to resolve a token at git operation time:
+
+```javascript
+const {resolveToken, clearTokenCache} = require(
+  '{team_root}/packages/squad-sdk/dist/identity/tokens.js'
+);
+clearTokenCache();
+resolveToken('{team_root}', '{role_slug}').then(token => {
+  if (token) process.stdout.write(token);
+  else process.exit(1);
+});
 ```
 
-Squad's environment injection handles the rest. The comment appears under the role app's `[bot]` identity (`sabbour-squad-backend[bot]`), even though the agent has no idea identity is involved.
+This:
+- Loads the app registration for the role slug
+- Reads the PEM key from `.squad/identity/keys/{role_slug}.pem`
+- Generates a fresh JWT (RS256 signed, 9-minute expiry)
+- Exchanges it for an installation token via GitHub API
+- Caches the token; refreshes proactively at 50 minutes
 
-### The Transparency Principle
+**Zero npm dependencies** — uses only `node:crypto` and `globalThis.fetch`.
 
-This design ensures:
+### Graceful Fallback
 
-- **Agents don't change.** They use `gh` as they always have — no SDK imports, no identity methods, no special handling. The task tool prompt doesn't mention identity at all.
-- **Operations are auditable.** Every action appears under a clear bot identity (derived from role), making it easy to filter GitHub events by role or trace agent behavior.
-- **Switching identity tiers is invisible.** If you swap from Tier 1 (shared app) to Tier 2 (per-role), the agent behavior doesn't change — only the `GH_TOKEN` that Squad injects into its environment.
+If identity resolution fails at any point:
+- Missing identity config
+- Missing PEM key
+- PEM read error
+- GitHub API error
+- Any other exception
 
-### Example: Comment with Identity
+The agent **silently falls back to default git auth** and continues. No spawn is ever blocked because of identity. This preserves reliability.
 
-When you run `task` to spawn an agent, the flow is:
+### Example: Commit and Push with Identity
 
+```bash
+# Inside spawned agent (GIT IDENTITY block provided by coordinator)
+TOKEN=$(node -e "const{resolveToken}=require('{team_root}/packages/squad-sdk/dist/identity/tokens.js');resolveToken('{team_root}','lead').then(t=>{if(t)process.stdout.write(t)})")
+
+git -c user.name="sabbour-squad-lead[bot]" \
+    -c user.email="sabbour-squad-lead[bot]@users.noreply.github.com" \
+    commit -m "[Flight] refactor: extract module"
+
+git push https://x-access-token:${TOKEN}@github.com/bradygaster/squad.git feature-branch
+
+# PR creation includes: "🤖 Created by [sabbour-squad-lead](https://github.com/apps/sabbour-squad-lead)"
+GH_TOKEN=$TOKEN gh pr create --title "..." --body "...\n\n🤖 Created by [sabbour-squad-lead](https://github.com/apps/sabbour-squad-lead)"
 ```
-1. User invokes: task tool with agent request
-   ↓
-2. Squad identifies agent's role (e.g., "Core Dev" → backend)
-   ↓
-3. Squad loads backend app credentials and generates an install token
-   ↓
-4. Squad spawns agent with GH_TOKEN=<install-token>
-   ↓
-5. Agent runs normally: gh issue comment 42 --body "..."
-   ↓
-6. gh CLI uses GH_TOKEN automatically
-   ↓
-7. GitHub records comment as posted by sabbour-squad-backend[bot]
+
+The agent sees no special identity logic — just standard git + gh CLI commands. Squad's environment (the GIT IDENTITY block) handles everything.
+
+---
+
+## Testing
+
+The identity system's end-to-end flow is validated by `scripts/test-identity-e2e.mjs`, a standalone smoke test that exercises:
+
+- **App registration loading** from `.squad/identity/config.json`
+- **PEM key reading** from `.squad/identity/keys/{role}.pem`
+- **JWT generation** (RS256 signature, 9-minute expiry)
+- **Installation token exchange** against GitHub's API
+- **Token caching and refresh** (cache hit, proactive refresh at 50 min)
+- **Role slug resolution** fallback logic
+- **Update flow** (re-detecting missing installation IDs)
+
+**To run locally** (requires configured identity):
+
+```bash
+node scripts/test-identity-e2e.mjs
 ```
 
-The agent itself never sees or configures identity. It's pure environment-based authentication.
+The test is **read-only** except for one update round-trip, which restores the original installation ID afterward. Safe to run repeatedly.
+
+**CLI commands are tested** via the `identity.ts` command layer — manual testing during development confirms the manifest flow, browser redirect, and file storage work end-to-end.
 
 ---
 

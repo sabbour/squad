@@ -6,6 +6,7 @@
  *   squad identity create --role lead    — create a GitHub App for a single role
  *   squad identity create --all          — create GitHub Apps for all 8 roles
  *   squad identity create --simple       — create a single shared GitHub App
+ *   squad identity update --role lead    — re-detect installation ID for existing app
  *   squad identity rotate --role lead    — open app settings to regenerate key
  *   squad identity rotate --role lead --import key.pem — import a new PEM key
  *
@@ -322,24 +323,6 @@ function sleep(ms: number): Promise<void> {
 }
 
 /**
- * Poll for an app installation ID, retrying every `intervalMs` for up to
- * `timeoutMs`. Returns the installation ID if found, or null on timeout.
- */
-async function pollForInstallation(
-  jwt: string,
-  intervalMs: number,
-  timeoutMs: number,
-): Promise<number | null> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    const id = await getAppInstallationId(jwt);
-    if (id) return id;
-    await sleep(intervalMs);
-  }
-  return null;
-}
-
-/**
  * Save credentials from the manifest flow to the identity directory.
  */
 function saveCredentials(
@@ -402,6 +385,8 @@ function runStatus(projectRoot: string): void {
 
   console.log(`\n  App registrations:`);
 
+  const brokenRoles: string[] = [];
+
   for (const key of appKeys) {
     const reg = loadAppRegistration(projectRoot, key);
     const keyExists = hasPrivateKey(projectRoot, key);
@@ -410,14 +395,25 @@ function runStatus(projectRoot: string): void {
       const keyStatus = keyExists
         ? `${GREEN}✓ key${RESET}`
         : `${RED}✗ no key${RESET}`;
+      const installStatus = reg.installationId === 0
+        ? `  ${RED}⚠ no installation${RESET}`
+        : `  ${DIM}install ${reg.installationId}${RESET}`;
       console.log(
-        `    ${BOLD}${key}${RESET}  ${DIM}→${RESET}  ${reg.appSlug} (app ${reg.appId})  ${keyStatus}`,
+        `    ${BOLD}${key}${RESET}  ${DIM}→${RESET}  ${reg.appSlug} (app ${reg.appId})  ${keyStatus}${installStatus}`,
       );
+      if (reg.installationId === 0 && keyExists) {
+        brokenRoles.push(key);
+      }
     } else {
       console.log(
         `    ${BOLD}${key}${RESET}  ${DIM}→${RESET}  ${RED}missing registration file${RESET}`,
       );
     }
+  }
+
+  if (brokenRoles.length > 0) {
+    console.log(`\n  ${YELLOW}⚠️${RESET}  ${brokenRoles.length === 1 ? 'Role' : 'Roles'} with missing installation ID: ${BOLD}${brokenRoles.join(', ')}${RESET}`);
+    console.log(`     Run ${BOLD}squad identity update --role ${brokenRoles[0]}${RESET} to re-detect the installation.`);
   }
 
   // Show agent mapping summary
@@ -430,7 +426,87 @@ function runStatus(projectRoot: string): void {
 }
 
 /**
+ * Wait for the user to install the app, polling indefinitely until detected or
+ * the user cancels with Ctrl+C. Keeps the UX tight — one command, fully working
+ * identity at the end.
+ */
+async function waitForInstallation(
+  jwt: string,
+  appSlug: string,
+  key: string,
+): Promise<number> {
+  const installUrl = `https://github.com/apps/${appSlug}/installations/select_target`;
+  console.log(`\n  ${BOLD}App created! Now install it on your repository.${RESET}`);
+  openBrowser(installUrl);
+  console.log(`  ${DIM}${installUrl}${RESET}`);
+  console.log(`\n  Waiting for installation... (Ctrl+C to cancel)\n`);
+
+  // Poll every 3s with no hard timeout — user controls via Ctrl+C
+  while (true) {
+    const id = await getAppInstallationId(jwt);
+    if (id) {
+      console.log(`  ${GREEN}✓${RESET} App installed — installation ID ${id}`);
+      return id;
+    }
+    await sleep(3_000);
+  }
+}
+
+/**
+ * Resolve a missing installation ID for an already-created app.
+ * Used when `create` is re-run on a role that already has credentials but
+ * installationId: 0. Makes `create` idempotent.
+ */
+async function resolveInstallationForExistingApp(
+  projectRoot: string,
+  key: string,
+  tier: IdentityTier,
+  roleSlug?: RoleSlug,
+): Promise<boolean> {
+  const reg = loadAppRegistration(projectRoot, key);
+  if (!reg) return false;
+
+  if (reg.installationId !== 0) {
+    console.log(`\n${GREEN}✅${RESET} App ${BOLD}${reg.appSlug}${RESET} already configured (installation ${reg.installationId}).`);
+    return true;
+  }
+
+  if (!hasPrivateKey(projectRoot, key)) {
+    console.error(`${RED}✗${RESET} App exists but PEM key is missing for '${key}'.`);
+    return false;
+  }
+
+  console.log(`\n  App ${BOLD}${reg.appSlug}${RESET} exists but installation is incomplete. Resolving...`);
+
+  const pemPath = join(projectRoot, '.squad', 'identity', 'keys', `${key}.pem`);
+  const pem = readFileSync(pemPath, 'utf-8');
+  const { generateAppJWT } = await import('@bradygaster/squad-sdk');
+  const jwt = await generateAppJWT(reg.appId, pem);
+
+  // Try immediate detection first
+  let installationId = await getAppInstallationId(jwt);
+  if (!installationId) {
+    installationId = await waitForInstallation(jwt, reg.appSlug, key);
+  }
+
+  // Update stored registration
+  const updatedReg = { ...reg, installationId };
+  saveAppRegistration(projectRoot, key, updatedReg);
+
+  const config = loadIdentityConfig(projectRoot);
+  if (config?.apps?.[key]) {
+    config.apps[key].installationId = installationId;
+    saveIdentityConfig(projectRoot, config);
+  }
+
+  clearTokenCache();
+  console.log(`${GREEN}✅${RESET} Installation resolved for ${BOLD}${key}${RESET} → ${installationId}\n`);
+  return true;
+}
+
+/**
  * Create a GitHub App for a single role (or 'shared') using the manifest flow.
+ * Idempotent — if the app already exists, skips creation and resolves installation.
  */
 async function createAppForRole(
   projectRoot: string,
@@ -439,6 +515,12 @@ async function createAppForRole(
   tier: IdentityTier,
   roleSlug?: RoleSlug,
 ): Promise<boolean> {
+  // Idempotent: if app already exists, skip creation and resolve installation
+  const existingReg = loadAppRegistration(projectRoot, key);
+  if (existingReg) {
+    return resolveInstallationForExistingApp(projectRoot, key, tier, roleSlug);
+  }
+
   const appName = tier === 'shared'
     ? `${username}-squad`
     : `${username}-squad-${key}`;
@@ -467,24 +549,7 @@ async function createAppForRole(
     let installationId = await getAppInstallationId(jwt);
 
     if (!installationId) {
-      // Auto-open browser to the app installation page
-      const installUrl = `https://github.com/apps/${appData.slug}/installations/select_target`;
-      console.log(`\n  ${BOLD}Installing app on your repository...${RESET} (confirm in browser)`);
-      openBrowser(installUrl);
-
-      // Poll for the installation to appear (every 2s, up to 60s)
-      installationId = await pollForInstallation(jwt, 2_000, 60_000);
-
-      if (!installationId) {
-        console.log(`\n  ${YELLOW}⚠️${RESET}  No installation detected after 60 seconds.`);
-        console.log(`  You can install the app manually at:`);
-        console.log(`  ${DIM}${installUrl}${RESET}`);
-        console.log(`  Then run ${BOLD}squad identity status${RESET} to verify.\n`);
-        // Save with installationId 0 — user will need to update after installing
-        installationId = 0;
-      } else {
-        console.log(`  ${GREEN}✓${RESET} App installed — installation ID ${installationId}`);
-      }
+      installationId = await waitForInstallation(jwt, appData.slug, key);
     }
 
     // Save credentials
@@ -561,6 +626,93 @@ async function runCreate(projectRoot: string, args: string[]): Promise<void> {
     }
     console.log(`\n${GREEN}✅${RESET} Created ${successCount}/${ALL_ROLES.length} apps.\n`);
   }
+}
+
+/**
+ * Re-detect and update the installation ID for an existing app registration.
+ * Does NOT create a new app or generate a new key — just queries GitHub API
+ * to find/update the installation.
+ *
+ * Accepts --installation-id <id> for manual override without API query.
+ */
+async function runUpdate(projectRoot: string, args: string[]): Promise<void> {
+  const roleIndex = args.indexOf('--role');
+  const roleArg = roleIndex >= 0 ? args[roleIndex + 1] : undefined;
+
+  if (!roleArg) {
+    console.error(`${RED}✗${RESET} --role <role> is required.`);
+    console.log(`  Example: ${DIM}squad identity update --role lead${RESET}`);
+    process.exit(1);
+  }
+
+  if (!ALL_ROLES.includes(roleArg as RoleSlug) && roleArg !== 'shared') {
+    console.error(`${RED}✗${RESET} Unknown role: ${roleArg}`);
+    console.error(`  Valid roles: ${ALL_ROLES.join(', ')}, shared`);
+    process.exit(1);
+  }
+
+  const reg = loadAppRegistration(projectRoot, roleArg);
+  if (!reg || !hasPrivateKey(projectRoot, roleArg)) {
+    console.error(
+      `${RED}✗${RESET} No app registered for role '${roleArg}'. ` +
+      `Run ${BOLD}squad identity create --role ${roleArg}${RESET} first.`,
+    );
+    process.exit(1);
+  }
+
+  // Manual override via --installation-id
+  const installIdIndex = args.indexOf('--installation-id');
+  const installIdArg = installIdIndex >= 0 ? args[installIdIndex + 1] : undefined;
+
+  if (installIdArg) {
+    const manualId = parseInt(installIdArg, 10);
+    if (isNaN(manualId) || manualId <= 0) {
+      console.error(`${RED}✗${RESET} Invalid installation ID: ${installIdArg}`);
+      process.exit(1);
+    }
+
+    // Update stored registration
+    saveAppRegistration(projectRoot, roleArg, { ...reg, installationId: manualId });
+
+    const config = loadIdentityConfig(projectRoot);
+    if (config?.apps?.[roleArg]) {
+      config.apps[roleArg].installationId = manualId;
+      saveIdentityConfig(projectRoot, config);
+    }
+
+    clearTokenCache();
+    console.log(`${GREEN}✅${RESET} Updated installation ID for ${BOLD}${roleArg}${RESET}: ${manualId}`);
+    return;
+  }
+
+  // Auto-detect via GitHub API
+  const pemPath = join(projectRoot, '.squad', 'identity', 'keys', `${roleArg}.pem`);
+  const pem = readFileSync(pemPath, 'utf-8');
+  const { generateAppJWT } = await import('@bradygaster/squad-sdk');
+  const jwt = await generateAppJWT(reg.appId, pem);
+
+  const installationId = await getAppInstallationId(jwt);
+
+  if (!installationId) {
+    const slug = reg.appSlug;
+    console.error(
+      `${RED}❌${RESET} No installation found — install the app at ` +
+      `https://github.com/apps/${slug}/installations/select_target`,
+    );
+    process.exit(1);
+  }
+
+  // Update stored registration
+  saveAppRegistration(projectRoot, roleArg, { ...reg, installationId });
+
+  const config = loadIdentityConfig(projectRoot);
+  if (config?.apps?.[roleArg]) {
+    config.apps[roleArg].installationId = installationId;
+    saveIdentityConfig(projectRoot, config);
+  }
+
+  clearTokenCache();
+  console.log(`${GREEN}✅${RESET} Updated installation ID for ${BOLD}${roleArg}${RESET}: ${installationId}`);
 }
 
 /**
@@ -752,6 +904,16 @@ export async function runIdentity(cwd: string, subArgs: string[]): Promise<void>
     return;
   }
 
+  if (sub === 'update') {
+    const projectRoot = resolveSquadDir(cwd);
+    if (!projectRoot) {
+      console.error(`${RED}✗${RESET} No squad found. Run "squad init" first.`);
+      process.exit(1);
+    }
+    await runUpdate(projectRoot, subArgs.slice(1));
+    return;
+  }
+
   if (sub === 'rotate') {
     const projectRoot = resolveSquadDir(cwd);
     if (!projectRoot) {
@@ -778,6 +940,7 @@ export async function runIdentity(cwd: string, subArgs: string[]): Promise<void>
   console.log(`  ${BOLD}squad identity create --role lead${RESET} — create app for a role`);
   console.log(`  ${BOLD}squad identity create --all${RESET}       — create apps for all roles`);
   console.log(`  ${BOLD}squad identity create --simple${RESET}    — create single shared app`);
+  console.log(`  ${BOLD}squad identity update --role lead${RESET} — re-detect installation ID`);
   console.log(`  ${BOLD}squad identity rotate --role lead${RESET} — rotate key for a role`);
   console.log(`  ${BOLD}squad identity export --role lead${RESET} — export secrets for CI/CD`);
   console.log(`  ${BOLD}squad identity export --all${RESET}       — export all secrets for CI/CD\n`);

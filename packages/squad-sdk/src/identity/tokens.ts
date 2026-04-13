@@ -46,7 +46,7 @@ export async function generateAppJWT(appId: number, privateKeyPem: string): Prom
   const payload = {
     iss: appId,
     iat: now - 60,   // 60 seconds in the past for clock drift
-    exp: now + 600,  // 10 minutes from now
+    exp: now + 540,  // 9 minutes — leaves buffer for clock skew (GitHub max is 10min)
   };
 
   const encodedHeader = base64url(JSON.stringify(header));

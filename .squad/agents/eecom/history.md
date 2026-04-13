@@ -321,6 +321,26 @@ Executed 3 tasks across 2 waves: economy mode (#500, PR #504), node:sqlite fix (
 
 ## Learnings
 
+### `squad identity create` — unified installation flow (2025-07-29)
+- Removed `squad identity fix` subcommand — installation resolution is now integrated into `create`.
+- `createAppForRole` is idempotent: if app already exists, calls `resolveInstallationForExistingApp` to resolve installationId: 0.
+- `waitForInstallation()` polls every 3s with no hard timeout — user cancels with Ctrl+C. No more 60s timeout giving up.
+- `runStatus()` now tells users to re-run `squad identity create --role <role>` instead of `squad identity fix`.
+- `getAppInstallationId()` remains a CLI-local helper — used by both `createAppForRole` and `resolveInstallationForExistingApp`.
+- `pollForInstallation()` (bounded timeout) removed in favor of `waitForInstallation()` (unbounded, user-controlled).
+- Test file: `test/identity/fix-installation.test.ts` — 7 tests covering storage updates, broken state detection (test names updated from `fix-installation:` to `installation-resolution:`).
+
+### `squad identity fix` — installation ID recovery (2025-07-29) [SUPERSEDED]
+- Superseded by the unified `create` flow above. The `fix` subcommand no longer exists.
+- `getAppInstallationId()` and storage update logic preserved in `resolveInstallationForExistingApp`.
+
+### execWithRoleToken / withRoleToken — implementation notes (2025-07-28)
+- `execWithRoleToken(teamRoot, roleSlug, command)` wraps `node:child_process.exec` with token injection.
+- `withRoleToken(teamRoot, roleSlug, fn)` wraps an arbitrary async callback — useful for programmatic `gh` API calls.
+- Both use the same save/restore pattern from spawn-token-injection: save previous `GH_TOKEN`, inject, finally-restore.
+- Mocking in tests must target `./tokens.js` directly (not the barrel `@bradygaster/squad-sdk/identity`) because `exec.ts` imports `resolveToken` from the sibling module, not the barrel.
+- 12 tests: 7 for `execWithRoleToken`, 5 for `withRoleToken`. All verify token set/restore/fallback.
+
 ### Token lifecycle — implementation notes (2025-07-25)
 - `generateAppJWT` uses `node:crypto` `createSign('RSA-SHA256')` — no jsonwebtoken dependency needed.
 - JWT payload sets `iat: now - 60` (clock drift) and `exp: now + 600` (GitHub's 10-min max).
@@ -342,6 +362,14 @@ Executed 3 tasks across 2 waves: economy mode (#500, PR #504), node:sqlite fix (
 - `formatComment` takes a single `{ agentName, role, body }` object — emoji is derived internally from the role via `resolveRoleSlug`.
 - `formatCommitMessage` takes `{ agentName, message }` object.
 - SDK subpath exports (e.g., `@bradygaster/squad-sdk/identity`) require an entry in `packages/squad-sdk/package.json` `"exports"` map.
+
+### E2E identity test script (2025-07-29)
+- Created `scripts/test-identity-e2e.mjs` — standalone Node.js ESM script exercising the full identity workflow.
+- 16 tests: CLI commands (status, update auto/manual), SDK functions (resolveToken, execWithRoleToken, formatting, role slugs), error cases.
+- Uses `@bradygaster/squad-sdk/identity` subpath import against built dist/.
+- `gh api /app` requires JWT auth — installation tokens must use `/installation/repositories` instead.
+- Auto-detect update may fail if the app has no discoverable installation via `GET /app/installations` — script handles this as a skip.
+- Script restores original installationId after round-trip test (manual override → auto-detect restore).
 
 
 ## Team Updates (2026-04-10)
