@@ -1036,29 +1036,23 @@ This covers: CLI commands (status, update, create), token resolution, `execWithR
 
 This assumes you have another repo that already has Squad set up (`.squad/team.md` exists with agents).
 
-**Step 1 — Build and link the Squad packages (one-time):**
+**Step 1 — Build the Squad repo (one-time):**
 
 ```bash
 cd /path/to/squad
 git checkout squad/agent-github-identity
 npm run build
-
-# Link both the CLI and SDK globally
-cd packages/squad-cli && npm link && cd ../..
-cd packages/squad-sdk && npm link && cd ../..
 ```
 
 **Step 2 — Link into your other repo and upgrade:**
 
 ```bash
 cd /path/to/other-repo
-
-# Link both packages so squad commands and SDK resolve from dev build
-npm link @bradygaster/squad-cli @bradygaster/squad-sdk
-
-# Upgrade deploys the latest squad.agent.md (with identity spawn template)
+npm link /path/to/squad/packages/squad-cli /path/to/squad/packages/squad-sdk
 npx squad upgrade
 ```
+
+The `npm link <path>` syntax registers and links in one step — no need to `cd` into each package. `squad upgrade` deploys the latest `squad.agent.md` (with identity spawn template).
 
 **Step 3 — Create identity (team-aware):**
 
@@ -1097,10 +1091,7 @@ After an agent creates a PR using identity:
 ### D. Cleanup
 
 ```bash
-# Remove npm links from the other repo
 cd /path/to/other-repo
 npm unlink @bradygaster/squad-cli @bradygaster/squad-sdk
-
-# Close any test PRs
-gh pr list --state open
+gh pr list --state open   # close any test PRs
 ```
