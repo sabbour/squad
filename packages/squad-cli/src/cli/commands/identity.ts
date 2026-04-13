@@ -3,6 +3,7 @@
  *
  * Usage:
  *   squad identity status                — show identity configuration and app registration status
+ *   squad identity create                — auto-detect roles from .squad/team.md
  *   squad identity create --role lead    — create a GitHub App for a single role
  *   squad identity create --all          — create GitHub Apps for all 8 roles
  *   squad identity create --simple       — create a single shared GitHub App
@@ -35,6 +36,7 @@ import {
   clearTokenCache,
 } from '@bradygaster/squad-sdk';
 import type { IdentityConfig, IdentityTier, RoleSlug } from '@bradygaster/squad-sdk';
+import { resolveRoleSlug } from '@bradygaster/squad-sdk/identity';
 import { BOLD, RESET, GREEN, DIM, RED, YELLOW } from '../core/output.js';
 
 /** All canonical role slugs. */
@@ -573,6 +575,54 @@ async function createAppForRole(
   }
 }
 
+/**
+ * Parse `.squad/team.md` to extract member roles and their resolved slugs.
+ * Returns an array of { name, role, slug } or null if team.md is missing/empty.
+ */
+function parseTeamRoles(projectRoot: string): { name: string; role: string; slug: RoleSlug }[] | null {
+  const teamPath = join(projectRoot, '.squad', 'team.md');
+  if (!existsSync(teamPath)) return null;
+
+  const content = readFileSync(teamPath, 'utf-8');
+  const lines = content.split('\n');
+
+  // Find the ## Members section and its table
+  let inMembers = false;
+  let headerParsed = false;
+  const members: { name: string; role: string; slug: RoleSlug }[] = [];
+
+  for (const line of lines) {
+    if (/^## Members\b/i.test(line)) {
+      inMembers = true;
+      continue;
+    }
+    if (inMembers && /^## /.test(line)) break; // next section
+
+    if (!inMembers) continue;
+
+    // Skip header row and separator
+    if (!headerParsed) {
+      if (line.includes('|') && line.includes('Name') && line.includes('Role')) {
+        headerParsed = true;
+      }
+      continue;
+    }
+    if (/^\s*\|[\s-|]+\|\s*$/.test(line)) continue; // separator row
+
+    // Parse table row: | Name | Role | ... |
+    const cells = line.split('|').map(c => c.trim()).filter(Boolean);
+    if (cells.length < 2) continue;
+
+    const name = cells[0];
+    const role = cells[1];
+    if (!name || !role) continue;
+
+    members.push({ name, role, slug: resolveRoleSlug(role) });
+  }
+
+  return members.length > 0 ? members : null;
+}
+
 async function runCreate(projectRoot: string, args: string[]): Promise<void> {
   // Parse flags
   const isAll = args.includes('--all');
@@ -588,7 +638,44 @@ async function runCreate(projectRoot: string, args: string[]): Promise<void> {
   }
 
   if (flagCount === 0) {
+    // Team-aware auto-detection: look for .squad/team.md
+    const teamMembers = parseTeamRoles(projectRoot);
+    if (teamMembers) {
+      console.log(`\n🔍 Reading team roster from .squad/team.md...\n`);
+
+      // Deduplicate slugs while preserving display info
+      const seen = new Map<RoleSlug, { name: string; role: string }>();
+      for (const m of teamMembers) {
+        if (!seen.has(m.slug)) {
+          seen.set(m.slug, { name: m.name, role: m.role });
+        }
+      }
+
+      const uniqueSlugs = [...seen.keys()];
+      console.log(`  Found ${uniqueSlugs.length} unique role${uniqueSlugs.length === 1 ? '' : 's'}:`);
+      for (const [slug, info] of seen) {
+        console.log(`    ${info.role} (${info.name})${' '.repeat(Math.max(1, 24 - info.role.length - info.name.length - 3))}→ ${slug}`);
+      }
+
+      console.log(`\n  Creating apps for: ${uniqueSlugs.join(', ')}\n`);
+
+      const username = await getGitHubUsername();
+      console.log(`  GitHub user: ${BOLD}${username}${RESET}\n`);
+
+      let successCount = 0;
+      for (let i = 0; i < uniqueSlugs.length; i++) {
+        const slug = uniqueSlugs[i]!;
+        console.log(`  [${i + 1}/${uniqueSlugs.length}] Creating app for ${slug}...`);
+        const ok = await createAppForRole(projectRoot, slug, username, 'per-role', slug);
+        if (ok) successCount++;
+      }
+      console.log(`\n${GREEN}✅${RESET} Created ${successCount}/${uniqueSlugs.length} apps.\n`);
+      return;
+    }
+
+    // No team.md — fall back to usage help
     console.log(`\n${BOLD}squad identity create${RESET} — create GitHub App identities\n`);
+    console.log(`  ${DIM}No flags + team.md  Auto-detect roles from .squad/team.md${RESET}`);
     console.log(`  ${BOLD}--role <role>${RESET}  Create app for a single role (${ALL_ROLES.join(', ')})`);
     console.log(`  ${BOLD}--all${RESET}          Create apps for all ${ALL_ROLES.length} roles`);
     console.log(`  ${BOLD}--simple${RESET}       Create a single shared app\n`);
@@ -937,6 +1024,7 @@ export async function runIdentity(cwd: string, subArgs: string[]): Promise<void>
   // No subcommand — show usage
   console.log(`\n${BOLD}squad identity${RESET} — manage agent GitHub App identity\n`);
   console.log(`  ${BOLD}squad identity status${RESET}             — show identity configuration`);
+  console.log(`  ${BOLD}squad identity create${RESET}             — auto-detect roles from team.md`);
   console.log(`  ${BOLD}squad identity create --role lead${RESET} — create app for a role`);
   console.log(`  ${BOLD}squad identity create --all${RESET}       — create apps for all roles`);
   console.log(`  ${BOLD}squad identity create --simple${RESET}    — create single shared app`);
