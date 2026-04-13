@@ -45,6 +45,7 @@ function makeTmpDir(): string {
 afterEach(() => {
   clearTokenCache();
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
   for (const dir of tmpDirs) {
     try {
       rmSync(dir, { recursive: true, force: true });

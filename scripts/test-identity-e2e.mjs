@@ -46,6 +46,20 @@ const PROJECT_ROOT = resolve(__dirname, '..');
 const CLI_BIN = resolve(PROJECT_ROOT, 'cli.js');
 
 // ---------------------------------------------------------------------------
+// Derive owner/repo from git remote
+// ---------------------------------------------------------------------------
+function getOwnerRepo() {
+  const url = execSync('git remote get-url origin', {
+    cwd: PROJECT_ROOT, encoding: 'utf-8',
+  }).trim();
+  // Handles HTTPS (github.com/owner/repo.git) and SSH (git@github.com:owner/repo.git)
+  const match = url.match(/github\.com[/:]([^/]+)\/([^/.]+?)(?:\.git)?$/);
+  if (!match) throw new Error(`Cannot parse owner/repo from remote URL: ${url}`);
+  return { owner: match[1], repo: match[2], full: `${match[1]}/${match[2]}` };
+}
+const REPO_INFO = getOwnerRepo();
+
+// ---------------------------------------------------------------------------
 // Test harness
 // ---------------------------------------------------------------------------
 let passed = 0;
@@ -273,13 +287,13 @@ console.log('\n━━━ Test 7: execWithRoleToken — gh api (verify bot identi
 clearTokenCache();
 try {
   const { stdout } = await execWithRoleToken(
-    PROJECT_ROOT, 'lead', 'gh api /repos/sabbour/squad --jq .full_name',
+    PROJECT_ROOT, 'lead', `gh api /repos/${REPO_INFO.full} --jq .full_name`,
   );
   const repoName = stdout.trim();
-  if (repoName === 'sabbour/squad') {
-    pass(`gh api /repos/sabbour/squad readable (${repoName})`);
+  if (repoName === REPO_INFO.full) {
+    pass(`gh api /repos/${REPO_INFO.full} readable (${repoName})`);
   } else {
-    fail('gh api /repos/sabbour/squad', `expected "sabbour/squad", got: ${repoName}`);
+    fail(`gh api /repos/${REPO_INFO.full}`, `expected "${REPO_INFO.full}", got: ${repoName}`);
   }
 } catch (err) {
   const msg = err.message || '';
@@ -463,7 +477,7 @@ console.log('\n━━━ Test 10: Git workflow (branch → commit → push → P
         const token = await resolveToken(PROJECT_ROOT, 'lead');
         if (token) {
           execSync(
-            `git push https://x-access-token:${token}@github.com/sabbour/squad.git --delete ${branch}`,
+            `git push https://x-access-token:${token}@github.com/${REPO_INFO.full}.git --delete ${branch}`,
             { cwd: PROJECT_ROOT, encoding: 'utf-8', stdio: 'pipe', timeout: 30_000 },
           );
         }
@@ -535,7 +549,7 @@ console.log('\n━━━ Test 10: Git workflow (branch → commit → push → P
     if (!token) throw new Error('resolveToken returned null — cannot push');
 
     execSync(
-      `git push https://x-access-token:${token}@github.com/sabbour/squad.git ${branch}`,
+      `git push https://x-access-token:${token}@github.com/${REPO_INFO.full}.git ${branch}`,
       { cwd: PROJECT_ROOT, encoding: 'utf-8', stdio: 'pipe' },
     );
     branchPushed = true;
@@ -560,7 +574,7 @@ console.log('\n━━━ Test 10: Git workflow (branch → commit → push → P
     // 10g: Delete remote branch with token-authenticated push
     const cleanupToken = await resolveToken(PROJECT_ROOT, 'lead');
     execSync(
-      `git push https://x-access-token:${cleanupToken}@github.com/sabbour/squad.git --delete ${branch}`,
+      `git push https://x-access-token:${cleanupToken}@github.com/${REPO_INFO.full}.git --delete ${branch}`,
       { cwd: PROJECT_ROOT, encoding: 'utf-8', stdio: 'pipe', timeout: 30_000 },
     );
     pass('closed PR and deleted remote branch');

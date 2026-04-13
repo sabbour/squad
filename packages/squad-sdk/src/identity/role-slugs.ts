@@ -23,7 +23,8 @@ const ROLE_PATTERNS: ReadonlyArray<readonly [string, RoleSlug]> = [
   // Frontend / UI
   ['frontend', 'frontend'],
   ['front-end', 'frontend'],
-  ['ui', 'frontend'],
+  ['ui/', 'frontend'],
+  ['ui ', 'frontend'],
   ['design', 'frontend'],
 
   // Backend / Core
