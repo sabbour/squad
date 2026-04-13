@@ -1006,3 +1006,97 @@ Squad's label-based routing handles assignment and review dispatch. The identity
 ---
 
 *Flight out.*
+
+---
+
+## Testing Instructions (Dev Branch — Pre-Merge)
+
+These instructions are for testing the identity feature from the source repo before it's published to npm.
+
+### Prerequisites
+
+- The Squad repo cloned locally with the `squad/agent-github-identity` branch checked out
+- `npm run build` completed successfully in the Squad repo
+- `gh` CLI installed and authenticated (`gh auth login`)
+
+### A. Unit & E2E Tests (in the Squad repo)
+
+```bash
+cd /path/to/squad
+git checkout squad/agent-github-identity
+npm run build
+
+# Run the E2E identity test suite (20 tests)
+node scripts/test-identity-e2e.mjs
+```
+
+This covers: CLI commands (status, update, create), token resolution, `execWithRoleToken`, formatting, role slugs, error cases, and a full git workflow (branch → commit as bot → push → draft PR → cleanup).
+
+### B. Testing on a Different Repo (Local Dev Build)
+
+Since this isn't published yet, you'll reference the Squad repo directly.
+
+**Step 1 — Set up identity in the other repo:**
+
+```bash
+SQUAD_CLI="/path/to/squad/cli.js"  # absolute path to squad repo
+
+cd /path/to/other-repo
+node $SQUAD_CLI identity create --role lead
+# Browser opens → install the app on THIS repo → wait for polling to detect installation
+
+node $SQUAD_CLI identity status
+# Should show: lead → your-app-slug (appId=..., install=...)
+```
+
+**Step 2 — Make the SDK available to agents:**
+
+Agents need the identity SDK to resolve tokens at runtime. Since it's not on npm yet, link it:
+
+```bash
+# In the Squad repo
+cd /path/to/squad/packages/squad-sdk
+npm link
+
+# In your other repo
+cd /path/to/other-repo
+npm link @bradygaster/squad-sdk
+```
+
+**Step 3 — Update the coordinator prompt:**
+
+Copy the latest `squad.agent.md` (which has the identity spawn template) to your other repo:
+
+```bash
+cp /path/to/squad/.github/agents/squad.agent.md \
+   /path/to/other-repo/.github/agents/squad.agent.md
+```
+
+**Step 4 — Test the full workflow:**
+
+Open a Copilot CLI session in the other repo and ask an agent to make a change that involves a push and PR. The coordinator should automatically include the GIT IDENTITY block in the spawn prompt. Verify:
+
+1. The commit author shows as `your-app-slug[bot]`
+2. The push authenticates via the GitHub App token (not your personal account)
+3. The PR is created by the bot app
+4. The PR body includes a link to the GitHub App
+
+### C. What to Verify on GitHub
+
+After an agent creates a PR using identity:
+
+- [ ] PR author shows as the GitHub App (bot avatar, not your personal avatar)
+- [ ] Commit author shows `your-app-slug[bot]` in the commit history
+- [ ] PR body contains the app attribution link
+- [ ] The app's installation page shows the correct repo access
+
+### D. Cleanup
+
+```bash
+# Remove npm link from the other repo
+cd /path/to/other-repo
+npm unlink @bradygaster/squad-sdk
+
+# Close any test PRs
+gh pr list --state open
+```
