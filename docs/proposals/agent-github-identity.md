@@ -1049,7 +1049,7 @@ npm run build
 ```bash
 cd /path/to/other-repo
 npm link /path/to/squad/packages/squad-cli /path/to/squad/packages/squad-sdk
-npx squad upgrade
+squad upgrade
 ```
 
 The `npm link <path>` syntax registers and links in one step — no need to `cd` into each package. `squad upgrade` deploys the latest `squad.agent.md` (with identity spawn template).
@@ -1057,17 +1057,17 @@ The `npm link <path>` syntax registers and links in one step — no need to `cd`
 **Step 3 — Create identity (team-aware):**
 
 ```bash
-npx squad identity create
+squad identity create
 ```
 
 This reads your `team.md`, detects roles, and creates GitHub Apps for each. A browser window opens per app — install it on this repo and wait for polling.
 
-You can also create a single role: `npx squad identity create --role lead`
+You can also create a single role: `squad identity create --role lead`
 
 **Step 4 — Verify:**
 
 ```bash
-npx squad identity status
+squad identity status
 ```
 
 **Step 5 — Test with Copilot CLI:**
