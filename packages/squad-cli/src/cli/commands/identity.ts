@@ -608,9 +608,15 @@ async function createAppForRole(
   const choice = await ask(`\n  Choice [1]: `);
 
   if (choice === '2' || choice === '3') {
-    const sourcePath = await ask(
+    let sourcePath = (await ask(
       `  Path to repo with existing identity (has .squad/identity/): `,
-    );
+    )).replace(/^~/, process.env.HOME ?? process.env.USERPROFILE ?? '~');
+    // Accept both repo root and direct .squad/identity path
+    if (sourcePath.endsWith('.squad/identity') || sourcePath.endsWith('.squad/identity/')) {
+      sourcePath = join(sourcePath, '..', '..');
+    } else if (sourcePath.endsWith('.squad') || sourcePath.endsWith('.squad/')) {
+      sourcePath = join(sourcePath, '..');
+    }
     if (!sourcePath || !existsSync(join(sourcePath, '.squad', 'identity'))) {
       console.log(`\n  ${RED}✗${RESET} No identity config found at that path.`);
       return false;
