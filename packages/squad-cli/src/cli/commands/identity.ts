@@ -7,6 +7,7 @@
  *   squad identity create --role lead    — create a GitHub App for a single role
  *   squad identity create --all          — create GitHub Apps for all 8 roles
  *   squad identity create --simple       — create a single shared GitHub App
+ *   squad identity create --import /path — import identity from another Squad repo
  *   squad identity update --role lead    — re-detect installation ID for existing app
  *   squad identity rotate --role lead    — open app settings to regenerate key
  *   squad identity rotate --role lead --import key.pem — import a new PEM key
@@ -23,7 +24,7 @@
  */
 
 import { join } from 'node:path';
-import { existsSync, readdirSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, writeFileSync, mkdirSync, copyFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { exec, execSync } from 'node:child_process';
 import { platform } from 'node:os';
@@ -507,6 +508,55 @@ async function resolveInstallationForExistingApp(
 }
 
 /**
+ * Import app credentials from another Squad repo into the current one.
+ * Copies the app registration JSON and PEM key, updates the local config,
+ * then triggers the installation resolution flow so the user can install
+ * the app on the current repo.
+ */
+async function importAppCredentials(
+  sourceRoot: string,
+  targetRoot: string,
+  key: string,
+  tier: IdentityTier,
+  roleSlug?: RoleSlug,
+): Promise<boolean> {
+  const sourceReg = loadAppRegistration(sourceRoot, key);
+  if (!sourceReg) {
+    console.log(`  ${DIM}No app registration for '${key}' in source repo — skipping import.${RESET}`);
+    return false;
+  }
+
+  const sourcePemPath = join(sourceRoot, '.squad', 'identity', 'keys', `${key}.pem`);
+  if (!existsSync(sourcePemPath)) {
+    console.error(`${RED}✗${RESET} Source repo has app registration for '${key}' but PEM key is missing.`);
+    return false;
+  }
+
+  console.log(`\n  Importing ${BOLD}${sourceReg.appSlug}${RESET} from source repo...`);
+
+  // Copy PEM key
+  const targetKeysDir = join(targetRoot, '.squad', 'identity', 'keys');
+  mkdirSync(targetKeysDir, { recursive: true });
+  copyFileSync(sourcePemPath, join(targetKeysDir, `${key}.pem`));
+
+  // Copy app registration (with installationId reset to 0 — new repo needs its own installation)
+  const importedReg = { ...sourceReg, installationId: 0, roleSlug, tier };
+  saveAppRegistration(targetRoot, key, importedReg);
+
+  // Update local config
+  const config = loadIdentityConfig(targetRoot) ?? { tier, apps: {} };
+  config.tier = tier;
+  if (!config.apps) config.apps = {};
+  config.apps[key] = importedReg;
+  saveIdentityConfig(targetRoot, config);
+
+  console.log(`  ${GREEN}✓${RESET} Imported app registration and key for '${key}'.`);
+
+  // Now resolve installation on the current repo
+  return resolveInstallationForExistingApp(targetRoot, key, tier, roleSlug);
+}
+
+/**
  * Create a GitHub App for a single role (or 'shared') using the manifest flow.
  * Idempotent — if the app already exists, skips creation and resolves installation.
  */
@@ -516,11 +566,17 @@ async function createAppForRole(
   username: string,
   tier: IdentityTier,
   roleSlug?: RoleSlug,
+  importSource?: string,
 ): Promise<boolean> {
-  // Idempotent: if app already exists, skip creation and resolve installation
+  // Idempotent: if app already exists locally, skip creation and resolve installation
   const existingReg = loadAppRegistration(projectRoot, key);
   if (existingReg) {
     return resolveInstallationForExistingApp(projectRoot, key, tier, roleSlug);
+  }
+
+  // Import path: copy credentials from another repo instead of creating a new app
+  if (importSource) {
+    return importAppCredentials(importSource, projectRoot, key, tier, roleSlug);
   }
 
   const appName = tier === 'shared'
@@ -570,7 +626,14 @@ async function createAppForRole(
     return true;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    console.error(`${RED}✗${RESET} Failed to create ${appName}: ${msg}`);
+    const isNameTaken = /already[_ ]exists|name.*taken|name.*already|is already taken/i.test(msg);
+    if (isNameTaken) {
+      console.error(`\n${YELLOW}⚠️${RESET}  App "${BOLD}${appName}${RESET}" already exists on GitHub.`);
+      console.error(`  To reuse it in this repo:\n`);
+      console.error(`    ${BOLD}squad identity create --import /path/to/repo-with-existing-identity${RESET}\n`);
+    } else {
+      console.error(`${RED}✗${RESET} Failed to create ${appName}: ${msg}`);
+    }
     return false;
   }
 }
@@ -629,13 +692,31 @@ async function runCreate(projectRoot: string, args: string[]): Promise<void> {
   const isSimple = args.includes('--simple');
   const roleIndex = args.indexOf('--role');
   const roleArg = roleIndex >= 0 ? args[roleIndex + 1] : undefined;
+  const importIndex = args.indexOf('--import');
+  const importSource = importIndex >= 0 ? args[importIndex + 1] : undefined;
 
-  // Validate mutually exclusive flags
+  // Validate --import path if provided
+  if (importIndex >= 0 && !importSource) {
+    console.error(`${RED}✗${RESET} --import requires a path to the source Squad repo.`);
+    process.exit(1);
+  }
+  if (importSource) {
+    const resolvedImport = resolveSquadDir(importSource);
+    if (!resolvedImport) {
+      console.error(`${RED}✗${RESET} No .squad directory found at: ${importSource}`);
+      process.exit(1);
+    }
+  }
+
+  // Validate mutually exclusive mode flags (--import is compatible with any mode)
   const flagCount = [isAll, isSimple, !!roleArg].filter(Boolean).length;
   if (flagCount > 1) {
     console.error(`${RED}✗${RESET} Use only one of: --role <role>, --all, --simple`);
     process.exit(1);
   }
+
+  // Resolve import source root once (if provided)
+  const importRoot = importSource ? resolveSquadDir(importSource) ?? undefined : undefined;
 
   if (flagCount === 0) {
     // Team-aware auto-detection: look for .squad/team.md
@@ -657,7 +738,8 @@ async function runCreate(projectRoot: string, args: string[]): Promise<void> {
         console.log(`    ${info.role} (${info.name})${' '.repeat(Math.max(1, 24 - info.role.length - info.name.length - 3))}→ ${slug}`);
       }
 
-      console.log(`\n  Creating apps for: ${uniqueSlugs.join(', ')}\n`);
+      const action = importRoot ? 'Importing' : 'Creating';
+      console.log(`\n  ${action} apps for: ${uniqueSlugs.join(', ')}\n`);
 
       const username = await getGitHubUsername();
       console.log(`  GitHub user: ${BOLD}${username}${RESET}\n`);
@@ -665,21 +747,23 @@ async function runCreate(projectRoot: string, args: string[]): Promise<void> {
       let successCount = 0;
       for (let i = 0; i < uniqueSlugs.length; i++) {
         const slug = uniqueSlugs[i]!;
-        console.log(`  [${i + 1}/${uniqueSlugs.length}] Creating app for ${slug}...`);
-        const ok = await createAppForRole(projectRoot, slug, username, 'per-role', slug);
+        console.log(`  [${i + 1}/${uniqueSlugs.length}] ${action} app for ${slug}...`);
+        const ok = await createAppForRole(projectRoot, slug, username, 'per-role', slug, importRoot);
         if (ok) successCount++;
       }
-      console.log(`\n${GREEN}✅${RESET} Created ${successCount}/${uniqueSlugs.length} apps.\n`);
+      console.log(`\n${GREEN}✅${RESET} ${action === 'Importing' ? 'Imported' : 'Created'} ${successCount}/${uniqueSlugs.length} apps.\n`);
       return;
     }
 
     // No team.md — fall back to usage help
     console.log(`\n${BOLD}squad identity create${RESET} — create GitHub App identities\n`);
     console.log(`  ${DIM}No flags + team.md  Auto-detect roles from .squad/team.md${RESET}`);
-    console.log(`  ${BOLD}--role <role>${RESET}  Create app for a single role (${ALL_ROLES.join(', ')})`);
-    console.log(`  ${BOLD}--all${RESET}          Create apps for all ${ALL_ROLES.length} roles`);
-    console.log(`  ${BOLD}--simple${RESET}       Create a single shared app\n`);
-    console.log(`  Example: ${DIM}squad identity create --role lead${RESET}\n`);
+    console.log(`  ${BOLD}--role <role>${RESET}      Create app for a single role (${ALL_ROLES.join(', ')})`);
+    console.log(`  ${BOLD}--all${RESET}              Create apps for all ${ALL_ROLES.length} roles`);
+    console.log(`  ${BOLD}--simple${RESET}           Create a single shared app`);
+    console.log(`  ${BOLD}--import <path>${RESET}    Import identity from another Squad repo\n`);
+    console.log(`  Example: ${DIM}squad identity create --role lead${RESET}`);
+    console.log(`  Example: ${DIM}squad identity create --import /path/to/other-repo${RESET}\n`);
     return;
   }
 
@@ -688,7 +772,7 @@ async function runCreate(projectRoot: string, args: string[]): Promise<void> {
 
   if (isSimple) {
     // Single shared app
-    await createAppForRole(projectRoot, 'shared', username, 'shared');
+    await createAppForRole(projectRoot, 'shared', username, 'shared', undefined, importRoot);
     return;
   }
 
@@ -699,19 +783,20 @@ async function runCreate(projectRoot: string, args: string[]): Promise<void> {
       console.error(`  Valid roles: ${ALL_ROLES.join(', ')}`);
       process.exit(1);
     }
-    await createAppForRole(projectRoot, roleArg, username, 'per-role', roleArg as RoleSlug);
+    await createAppForRole(projectRoot, roleArg, username, 'per-role', roleArg as RoleSlug, importRoot);
     return;
   }
 
   if (isAll) {
     // Create apps for all roles sequentially
-    console.log(`\n  Creating apps for all ${ALL_ROLES.length} roles...`);
+    const action = importRoot ? 'Importing' : 'Creating';
+    console.log(`\n  ${action} apps for all ${ALL_ROLES.length} roles...`);
     let successCount = 0;
     for (const role of ALL_ROLES) {
-      const ok = await createAppForRole(projectRoot, role, username, 'per-role', role);
+      const ok = await createAppForRole(projectRoot, role, username, 'per-role', role, importRoot);
       if (ok) successCount++;
     }
-    console.log(`\n${GREEN}✅${RESET} Created ${successCount}/${ALL_ROLES.length} apps.\n`);
+    console.log(`\n${GREEN}✅${RESET} ${action === 'Importing' ? 'Imported' : 'Created'} ${successCount}/${ALL_ROLES.length} apps.\n`);
   }
 }
 
@@ -1028,6 +1113,7 @@ export async function runIdentity(cwd: string, subArgs: string[]): Promise<void>
   console.log(`  ${BOLD}squad identity create --role lead${RESET} — create app for a role`);
   console.log(`  ${BOLD}squad identity create --all${RESET}       — create apps for all roles`);
   console.log(`  ${BOLD}squad identity create --simple${RESET}    — create single shared app`);
+  console.log(`  ${BOLD}squad identity create --import ..${RESET} — import identity from another repo`);
   console.log(`  ${BOLD}squad identity update --role lead${RESET} — re-detect installation ID`);
   console.log(`  ${BOLD}squad identity rotate --role lead${RESET} — rotate key for a role`);
   console.log(`  ${BOLD}squad identity export --role lead${RESET} — export secrets for CI/CD`);
