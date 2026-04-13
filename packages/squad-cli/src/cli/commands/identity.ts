@@ -53,6 +53,8 @@ const DEFAULT_PERMISSIONS = {
   contents: 'write',
   metadata: 'read',
   statuses: 'write',
+  checks: 'read',
+  actions: 'read',
 } as const;
 
 /** Human-readable descriptions per role for the GitHub App profile. */
