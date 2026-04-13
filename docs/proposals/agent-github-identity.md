@@ -1032,54 +1032,80 @@ node scripts/test-identity-e2e.mjs
 
 This covers: CLI commands (status, update, create), token resolution, `execWithRoleToken`, formatting, role slugs, error cases, and a full git workflow (branch → commit as bot → push → draft PR → cleanup).
 
-### B. Testing on a Different Repo (Local Dev Build)
+### B. Testing on a Different Repo (Pre-Initialized with Squad)
 
-Since this isn't published yet, you'll reference the Squad repo directly.
+This assumes you have another repo that already has Squad set up (`.squad/team.md` exists with agents).
 
-**Step 1 — Set up identity in the other repo:**
+**Step 1 — Build the Squad repo (one-time):**
 
 ```bash
-SQUAD_CLI="/path/to/squad/cli.js"  # absolute path to squad repo
-
-cd /path/to/other-repo
-node $SQUAD_CLI identity create --role lead
-# Browser opens → install the app on THIS repo → wait for polling to detect installation
-
-node $SQUAD_CLI identity status
-# Should show: lead → your-app-slug (appId=..., install=...)
+cd /path/to/squad
+git checkout squad/agent-github-identity
+npm run build
 ```
 
-**Step 2 — Make the SDK available to agents:**
+**Step 2 — Link the SDK into your other repo:**
 
-Agents need the identity SDK to resolve tokens at runtime. Since it's not on npm yet, link it:
+Agents resolve tokens at runtime using the Squad SDK. Since it's not published yet, use npm link:
 
 ```bash
-# In the Squad repo
+# Register the SDK for linking (in the Squad repo)
 cd /path/to/squad/packages/squad-sdk
 npm link
 
-# In your other repo
+# Consume the linked SDK (in your other repo)
 cd /path/to/other-repo
 npm link @bradygaster/squad-sdk
 ```
 
-**Step 3 — Update the coordinator prompt:**
+**Step 3 — Copy the updated coordinator prompt:**
 
-Copy the latest `squad.agent.md` (which has the identity spawn template) to your other repo:
+The new `squad.agent.md` includes the GIT IDENTITY spawn template. Copy it to your other repo:
 
 ```bash
 cp /path/to/squad/.github/agents/squad.agent.md \
    /path/to/other-repo/.github/agents/squad.agent.md
 ```
 
-**Step 4 — Test the full workflow:**
+**Step 4 — Create identity (team-aware):**
 
-Open a Copilot CLI session in the other repo and ask an agent to make a change that involves a push and PR. The coordinator should automatically include the GIT IDENTITY block in the spawn prompt. Verify:
+Run `identity create` with no flags. It reads your `team.md`, detects the roles, and creates GitHub Apps for each unique role:
 
-1. The commit author shows as `your-app-slug[bot]`
-2. The push authenticates via the GitHub App token (not your personal account)
-3. The PR is created by the bot app
-4. The PR body includes a link to the GitHub App
+```bash
+cd /path/to/other-repo
+node /path/to/squad/cli.js identity create
+```
+
+Example output:
+```
+🔍 Reading team roster from .squad/team.md...
+  Found 3 unique roles:
+    Lead (CONTROL)     → lead
+    Core Dev (EECOM)   → backend  
+    DevRel (PAO)       → docs
+  Creating apps for: lead, backend, docs
+```
+
+A browser window opens for each app — install it on this repo and wait for polling to detect the installation.
+
+You can also create a single role manually: `node /path/to/squad/cli.js identity create --role lead`
+
+**Step 5 — Verify identity is configured:**
+
+```bash
+node /path/to/squad/cli.js identity status
+```
+
+Should show each app with a valid installation ID.
+
+**Step 6 — Test with Copilot CLI:**
+
+Open a Copilot CLI session in your other repo and ask an agent to make a change that requires a push and PR. The coordinator automatically injects the GIT IDENTITY block into the spawn prompt. The agent will:
+
+1. Commit as `your-app-slug[bot]`
+2. Push using the GitHub App installation token
+3. Open a PR authenticated as the bot
+4. Include the app attribution link in the PR body
 
 ### C. What to Verify on GitHub
 
