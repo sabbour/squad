@@ -341,7 +341,7 @@ prompt: |
   {% endif %}
 
   {only if identity configured:}
-  GIT IDENTITY: Commit as `{app_slug}[bot]`. Push with token: `TOKEN=$(node -e "const{resolveToken,clearTokenCache}=require('{team_root}/packages/squad-sdk/dist/identity/tokens.js');clearTokenCache();resolveToken('{team_root}','{role_slug}').then(t=>{if(t)process.stdout.write(t);else process.exit(1)})"); git push https://x-access-token:${TOKEN}@github.com/{owner}/{repo}.git BRANCH`. PR body: `🤖 [{app_slug}](https://github.com/apps/{app_slug})`.
+  GIT IDENTITY: Commit as `{app_slug}[bot]`. Push with token: `TOKEN=$(node --input-type=module -e "import{pathToFileURL}from'node:url';const{resolveToken,clearTokenCache}=await import(pathToFileURL('{team_root}/packages/squad-sdk/dist/identity/tokens.js').href);clearTokenCache();const t=await resolveToken('{team_root}','{role_slug}');if(t)process.stdout.write(t);else process.exit(1)"); git push https://x-access-token:${TOKEN}@github.com/{owner}/{repo}.git BRANCH`. PR body: `🤖 [{app_slug}](https://github.com/apps/{app_slug})`.
   {end identity block}
 
   TASK: {specific task description}
@@ -843,7 +843,7 @@ prompt: |
   
   **Resolve token at runtime:**
   ```bash
-  TOKEN=$(node -e "const{resolveToken,clearTokenCache}=require('{team_root}/packages/squad-sdk/dist/identity/tokens.js');clearTokenCache();resolveToken('{team_root}','{role_slug}').then(t=>{if(t)process.stdout.write(t);else process.exit(1)})")
+  TOKEN=$(node --input-type=module -e "import{pathToFileURL}from'node:url';const{resolveToken,clearTokenCache}=await import(pathToFileURL('{team_root}/packages/squad-sdk/dist/identity/tokens.js').href);clearTokenCache();const t=await resolveToken('{team_root}','{role_slug}');if(t)process.stdout.write(t);else process.exit(1)")
   ```
   If token resolution fails (no identity configured), fall back to default git auth — do NOT block on identity.
   
