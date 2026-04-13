@@ -1036,71 +1036,49 @@ This covers: CLI commands (status, update, create), token resolution, `execWithR
 
 This assumes you have another repo that already has Squad set up (`.squad/team.md` exists with agents).
 
-**Step 1 — Build the Squad repo (one-time):**
+**Step 1 — Build and link the Squad packages (one-time):**
 
 ```bash
 cd /path/to/squad
 git checkout squad/agent-github-identity
 npm run build
+
+# Link both the CLI and SDK globally
+cd packages/squad-cli && npm link && cd ../..
+cd packages/squad-sdk && npm link && cd ../..
 ```
 
-**Step 2 — Link the SDK into your other repo:**
-
-Agents resolve tokens at runtime using the Squad SDK. Since it's not published yet, use npm link:
-
-```bash
-# Register the SDK for linking (in the Squad repo)
-cd /path/to/squad/packages/squad-sdk
-npm link
-
-# Consume the linked SDK (in your other repo)
-cd /path/to/other-repo
-npm link @bradygaster/squad-sdk
-```
-
-**Step 3 — Copy the updated coordinator prompt:**
-
-The new `squad.agent.md` includes the GIT IDENTITY spawn template. Copy it to your other repo:
-
-```bash
-cp /path/to/squad/.github/agents/squad.agent.md \
-   /path/to/other-repo/.github/agents/squad.agent.md
-```
-
-**Step 4 — Create identity (team-aware):**
-
-Run `identity create` with no flags. It reads your `team.md`, detects the roles, and creates GitHub Apps for each unique role:
+**Step 2 — Link into your other repo and upgrade:**
 
 ```bash
 cd /path/to/other-repo
-node /path/to/squad/cli.js identity create
+
+# Link both packages so squad commands and SDK resolve from dev build
+npm link @bradygaster/squad-cli @bradygaster/squad-sdk
+
+# Upgrade deploys the latest squad.agent.md (with identity spawn template)
+npx squad upgrade
 ```
 
-Example output:
-```
-🔍 Reading team roster from .squad/team.md...
-  Found 3 unique roles:
-    Lead (CONTROL)     → lead
-    Core Dev (EECOM)   → backend  
-    DevRel (PAO)       → docs
-  Creating apps for: lead, backend, docs
-```
-
-A browser window opens for each app — install it on this repo and wait for polling to detect the installation.
-
-You can also create a single role manually: `node /path/to/squad/cli.js identity create --role lead`
-
-**Step 5 — Verify identity is configured:**
+**Step 3 — Create identity (team-aware):**
 
 ```bash
-node /path/to/squad/cli.js identity status
+npx squad identity create
 ```
 
-Should show each app with a valid installation ID.
+This reads your `team.md`, detects roles, and creates GitHub Apps for each. A browser window opens per app — install it on this repo and wait for polling.
 
-**Step 6 — Test with Copilot CLI:**
+You can also create a single role: `npx squad identity create --role lead`
 
-Open a Copilot CLI session in your other repo and ask an agent to make a change that requires a push and PR. The coordinator automatically injects the GIT IDENTITY block into the spawn prompt. The agent will:
+**Step 4 — Verify:**
+
+```bash
+npx squad identity status
+```
+
+**Step 5 — Test with Copilot CLI:**
+
+Open a Copilot CLI session in your other repo and ask an agent to make a change that requires a push and PR. The coordinator automatically injects the GIT IDENTITY block. The agent will:
 
 1. Commit as `your-app-slug[bot]`
 2. Push using the GitHub App installation token
@@ -1119,9 +1097,9 @@ After an agent creates a PR using identity:
 ### D. Cleanup
 
 ```bash
-# Remove npm link from the other repo
+# Remove npm links from the other repo
 cd /path/to/other-repo
-npm unlink @bradygaster/squad-sdk
+npm unlink @bradygaster/squad-cli @bradygaster/squad-sdk
 
 # Close any test PRs
 gh pr list --state open
