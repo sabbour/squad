@@ -26,6 +26,7 @@
 import { join } from 'node:path';
 import { existsSync, readdirSync, readFileSync, writeFileSync, mkdirSync, copyFileSync } from 'node:fs';
 import { createServer } from 'node:http';
+import { createInterface } from 'node:readline';
 import { exec, execSync } from 'node:child_process';
 import { platform } from 'node:os';
 import {
@@ -105,6 +106,17 @@ async function getGitHubUsername(): Promise<string> {
       } else {
         resolve(stdout.trim());
       }
+    });
+  });
+}
+
+/** Prompt the user with a question and return their answer. */
+function ask(question: string): Promise<string> {
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  return new Promise((resolve) => {
+    rl.question(question, (answer) => {
+      rl.close();
+      resolve(answer.trim());
     });
   });
 }
@@ -559,6 +571,10 @@ async function importAppCredentials(
 /**
  * Create a GitHub App for a single role (or 'shared') using the manifest flow.
  * Idempotent — if the app already exists, skips creation and resolves installation.
+ *
+ * Before opening the browser, checks with the user if the app name already
+ * exists on GitHub (e.g., from another repo). If so, offers to import
+ * credentials from the source repo or use a different name.
  */
 async function createAppForRole(
   projectRoot: string,
@@ -579,9 +595,40 @@ async function createAppForRole(
     return importAppCredentials(importSource, projectRoot, key, tier, roleSlug);
   }
 
-  const appName = tier === 'shared'
+  let appName = tier === 'shared'
     ? `${username}-squad`
     : `${username}-squad-${key}`;
+
+  // GitHub has no API to pre-check app name availability, so ask the user
+  // before opening the browser (avoids the "name already taken" dead end).
+  console.log(`\n  App name: ${BOLD}${appName}${RESET}`);
+  console.log(`  ${DIM}(1)${RESET} Create new app ${DIM}(opens browser)${RESET}`);
+  console.log(`  ${DIM}(2)${RESET} Already exists — import from another repo`);
+  console.log(`  ${DIM}(3)${RESET} Already exists — just install on this repo ${DIM}(opens browser)${RESET}`);
+  console.log(`  Or type a custom app name`);
+  const choice = await ask(`\n  Choice [1]: `);
+
+  if (choice === '2') {
+    const sourcePath = await ask(
+      `  Path to repo with existing identity (has .squad/identity/): `,
+    );
+    if (sourcePath && existsSync(join(sourcePath, '.squad', 'identity'))) {
+      return importAppCredentials(sourcePath, projectRoot, key, tier, roleSlug);
+    }
+    console.log(`\n  ${RED}✗${RESET} No identity config found at that path.`);
+    return false;
+  } else if (choice === '3') {
+    // Open the installation page for the existing app
+    const installUrl = `https://github.com/apps/${appName}/installations/select_target`;
+    console.log(`\n  Opening: ${DIM}${installUrl}${RESET}`);
+    openBrowser(installUrl);
+    console.log(`\n  After installing, import the credentials:`);
+    console.log(`  ${BOLD}squad identity create --import /path/to/repo-with-existing-identity${RESET}\n`);
+    return false;
+  } else if (choice && choice !== '1' && choice.length > 0) {
+    appName = choice;
+    console.log(`  Using custom name: ${BOLD}${appName}${RESET}`);
+  }
 
   console.log(`\n${BOLD}Creating GitHub App: ${appName}${RESET}`);
 
@@ -626,14 +673,7 @@ async function createAppForRole(
     return true;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    const isNameTaken = /already[_ ]exists|name.*taken|name.*already|is already taken/i.test(msg);
-    if (isNameTaken) {
-      console.error(`\n${YELLOW}⚠️${RESET}  App "${BOLD}${appName}${RESET}" already exists on GitHub.`);
-      console.error(`  To reuse it in this repo:\n`);
-      console.error(`    ${BOLD}squad identity create --import /path/to/repo-with-existing-identity${RESET}\n`);
-    } else {
-      console.error(`${RED}✗${RESET} Failed to create ${appName}: ${msg}`);
-    }
+    console.error(`${RED}✗${RESET} Failed to create ${appName}: ${msg}`);
     return false;
   }
 }
