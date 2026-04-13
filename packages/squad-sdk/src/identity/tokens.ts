@@ -6,7 +6,7 @@
  *
  * Flow:
  *   1. Load PEM from `.squad/identity/keys/{roleKey}.pem`
- *   2. Generate a short-lived JWT (RS256, 10 min)
+ *   2. Generate a short-lived JWT (RS256, 9 min)
  *   3. Exchange JWT for an installation access token via GitHub API
  *   4. Cache token, refresh when within 10 minutes of expiry
  *
@@ -34,7 +34,7 @@ function base64url(input: string | Buffer): string {
 /**
  * Generate a JWT for GitHub App authentication.
  * Uses RS256 signing with the app's private key (PEM format).
- * JWT is valid for 10 minutes (GitHub's maximum).
+ * JWT is valid for 9 minutes (leaves buffer under GitHub's 10-minute maximum).
  *
  * @param appId - GitHub App ID
  * @param privateKeyPem - RSA private key in PEM format

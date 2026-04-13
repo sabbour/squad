@@ -59,6 +59,12 @@ function pass(name) {
   console.log(`  ✅ ${name}`);
 }
 
+/** Sanitize error messages to prevent token leakage in logs. */
+function sanitizeError(msg) {
+  return msg.replace(/ghs_[A-Za-z0-9_]+/g, '[REDACTED]')
+            .replace(/x-access-token:[^@]+/g, 'x-access-token:[REDACTED]');
+}
+
 function fail(name, reason) {
   failed++;
   results.push({ name, status: 'fail', reason });
@@ -583,7 +589,7 @@ console.log('\n━━━ Test 10: Git workflow (branch → commit → push → P
       fail('restore original branch', `expected ${originalBranch}, on ${currentBranch}`);
     }
   } catch (err) {
-    fail('git workflow', err.message);
+    fail('git workflow', sanitizeError(err.message));
     await cleanup();
   }
 }

@@ -121,7 +121,13 @@ export async function spawnAgent(
   try {
     const slug = resolveRoleSlug(role);
     injectedToken = await resolveToken(teamRoot, slug);
-    debugLog('spawnAgent: identity token for', name, `(role=${role}, slug=${slug}):`, injectedToken ? 'resolved' : 'none');
+    // Fallback to 'lead' if role-specific token not available
+    if (!injectedToken && slug !== 'lead') {
+      injectedToken = await resolveToken(teamRoot, 'lead');
+      debugLog('spawnAgent: identity token for', name, `(role=${role}, slug=${slug}): fallback to lead:`, injectedToken ? 'resolved' : 'none');
+    } else {
+      debugLog('spawnAgent: identity token for', name, `(role=${role}, slug=${slug}):`, injectedToken ? 'resolved' : 'none');
+    }
   } catch (err) {
     debugLog('spawnAgent: identity token resolution failed for', name, '— continuing without token:', err);
   }

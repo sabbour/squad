@@ -108,9 +108,9 @@ describe('generateAppJWT', () => {
     expect(payload.iat).toBeGreaterThanOrEqual(beforeTime - 61);
     expect(payload.iat).toBeLessThanOrEqual(afterTime - 59);
 
-    // exp should be ~600 seconds from now
-    expect(payload.exp).toBeGreaterThanOrEqual(beforeTime + 599);
-    expect(payload.exp).toBeLessThanOrEqual(afterTime + 601);
+    // exp should be ~540 seconds from now (9 minutes)
+    expect(payload.exp).toBeGreaterThanOrEqual(beforeTime + 539);
+    expect(payload.exp).toBeLessThanOrEqual(afterTime + 541);
   });
 
   it('produces different JWTs for different app IDs', async () => {
