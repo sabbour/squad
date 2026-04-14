@@ -179,47 +179,47 @@ export async function resolveToken(
   squadDir: string,
   roleKey: string,
 ): Promise<string | null> {
-  // Check cache — return if still valid
-  const cached = tokenCache.get(roleKey);
-  if (cached) {
-    const remainingMs = cached.expiresAt.getTime() - Date.now();
-    if (remainingMs > REFRESH_MARGIN_MS) {
-      return cached.token;
+  try {
+    // Check cache — return if still valid
+    const cached = tokenCache.get(roleKey);
+    if (cached) {
+      const remainingMs = cached.expiresAt.getTime() - Date.now();
+      if (remainingMs > REFRESH_MARGIN_MS) {
+        return cached.token;
+      }
+      // Expired or near expiry — remove and re-fetch
+      tokenCache.delete(roleKey);
     }
-    // Expired or near expiry — remove and re-fetch
-    tokenCache.delete(roleKey);
-  }
 
-  // --- Path 1: Environment variables (CI/CD override) ---
-  const envCreds = resolveEnvCredentials(roleKey);
-  if (envCreds) {
-    const jwt = await generateAppJWT(envCreds.appId, envCreds.pem);
-    const { token, expiresAt } = await getInstallationToken(jwt, envCreds.installationId);
+    // --- Path 1: Environment variables (CI/CD override) ---
+    const envCreds = resolveEnvCredentials(roleKey);
+    if (envCreds) {
+      const jwt = await generateAppJWT(envCreds.appId, envCreds.pem);
+      const { token, expiresAt } = await getInstallationToken(jwt, envCreds.installationId);
+      tokenCache.set(roleKey, { token, expiresAt });
+      return token;
+    }
+
+    // --- Path 2: Filesystem (default) ---
+    // Load app registration
+    const reg = loadAppRegistration(squadDir, roleKey);
+    if (!reg) return null;
+
+    // Load PEM
+    const pemPath = join(squadDir, '.squad', 'identity', 'keys', `${roleKey}.pem`);
+    if (!existsSync(pemPath)) return null;
+
+    const pem = readFileSync(pemPath, 'utf-8');
+
+    // Generate JWT and exchange for installation token
+    const jwt = await generateAppJWT(reg.appId, pem);
+    const { token, expiresAt } = await getInstallationToken(jwt, reg.installationId);
+
+    // Cache
     tokenCache.set(roleKey, { token, expiresAt });
     return token;
-  }
-
-  // --- Path 2: Filesystem (default) ---
-  // Load app registration
-  const reg = loadAppRegistration(squadDir, roleKey);
-  if (!reg) return null;
-
-  // Load PEM
-  const pemPath = join(squadDir, '.squad', 'identity', 'keys', `${roleKey}.pem`);
-  if (!existsSync(pemPath)) return null;
-
-  let pem: string;
-  try {
-    pem = readFileSync(pemPath, 'utf-8');
   } catch {
+    // Graceful fallback — never throw; callers expect null on failure
     return null;
   }
-
-  // Generate JWT and exchange for installation token
-  const jwt = await generateAppJWT(reg.appId, pem);
-  const { token, expiresAt } = await getInstallationToken(jwt, reg.installationId);
-
-  // Cache
-  tokenCache.set(roleKey, { token, expiresAt });
-  return token;
 }

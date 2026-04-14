@@ -341,7 +341,7 @@ prompt: |
   {% endif %}
 
   {only if identity configured:}
-  GIT IDENTITY: Commit as `{app_slug}[bot]`. Push with token: `TOKEN=$(node --input-type=module -e "import{pathToFileURL}from'node:url';const{resolveToken,clearTokenCache}=await import(pathToFileURL('{team_root}/packages/squad-sdk/dist/identity/tokens.js').href);clearTokenCache();const t=await resolveToken('{team_root}','{role_slug}');if(t)process.stdout.write(t)"); if [ -n "$TOKEN" ]; then git push https://x-access-token:${TOKEN}@github.com/{owner}/{repo}.git BRANCH; else git push; fi`. PR: `if [ -n "$TOKEN" ]; then GH_TOKEN=$TOKEN gh pr create --repo {owner}/{repo} ...; else gh pr create ...; fi`. PR body: `🤖 [{app_slug}](https://github.com/apps/{app_slug})`.
+  GIT IDENTITY: Commit as `{app_slug}[bot]`. Push with token: `TOKEN=$(node --input-type=module -e "import{pathToFileURL}from'node:url';const{resolveToken}=await import(pathToFileURL('{team_root}/packages/squad-sdk/dist/identity/tokens.js').href);const t=await resolveToken('{team_root}','{role_slug}');if(t)process.stdout.write(t)"); if [ -n "$TOKEN" ]; then git push https://x-access-token:${TOKEN}@github.com/{owner}/{repo}.git {branch}; else git push; fi`. PR: `if [ -n "$TOKEN" ]; then GH_TOKEN=$TOKEN gh pr create --repo {owner}/{repo} ...; else gh pr create ...; fi`. PR body: `🤖 [{app_slug}](https://github.com/apps/{app_slug})`.
   {end identity block}
 
   TASK: {specific task description}
@@ -843,7 +843,7 @@ prompt: |
   
   **Resolve token at runtime:**
   ```bash
-  TOKEN=$(node --input-type=module -e "import{pathToFileURL}from'node:url';const{resolveToken,clearTokenCache}=await import(pathToFileURL('{team_root}/packages/squad-sdk/dist/identity/tokens.js').href);clearTokenCache();const t=await resolveToken('{team_root}','{role_slug}');if(t)process.stdout.write(t)")
+  TOKEN=$(node --input-type=module -e "import{pathToFileURL}from'node:url';const{resolveToken}=await import(pathToFileURL('{team_root}/packages/squad-sdk/dist/identity/tokens.js').href);const t=await resolveToken('{team_root}','{role_slug}');if(t)process.stdout.write(t)")
   ```
   If token resolution fails (no identity configured), fall back to default git auth — do NOT block on identity.
   
