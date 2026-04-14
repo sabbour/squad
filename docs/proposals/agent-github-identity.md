@@ -770,7 +770,7 @@ Before spawning an agent, the coordinator:
 The GIT IDENTITY block instructs agents to resolve a token at git operation time. This is done with a Node.js ESM one-liner:
 
 ```bash
-TOKEN=$(node --input-type=module -e "import{pathToFileURL}from'node:url';const{resolveToken,clearTokenCache}=await import(pathToFileURL('{team_root}/packages/squad-sdk/dist/identity/tokens.js').href);clearTokenCache();const t=await resolveToken('{team_root}','{role_slug}');if(t)process.stdout.write(t)")
+TOKEN=$(node --input-type=module -e "const{resolveToken,clearTokenCache}=await import('@bradygaster/squad-sdk/identity');clearTokenCache();const t=await resolveToken(process.cwd(),'{role_slug}');if(t)process.stdout.write(t)")
 ```
 
 Note: **No `process.exit(1)` on failure**. If token resolution fails, `TOKEN` is left empty. Git and gh commands then use a conditional:
@@ -847,7 +847,7 @@ squad upgrade                            # Deploy latest squad.agent.md with ide
 Now, when an agent pushes, it uses the identity-resolved token:
 ```bash
 # Inside spawned agent (GIT IDENTITY block provided by coordinator)
-TOKEN=$(node --input-type=module -e "import{pathToFileURL}from'node:url';const{resolveToken,clearTokenCache}=await import(pathToFileURL('{team_root}/packages/squad-sdk/dist/identity/tokens.js').href);clearTokenCache();const t=await resolveToken('{team_root}','lead');if(t)process.stdout.write(t)")
+TOKEN=$(node --input-type=module -e "const{resolveToken,clearTokenCache}=await import('@bradygaster/squad-sdk/identity');clearTokenCache();const t=await resolveToken(process.cwd(),'lead');if(t)process.stdout.write(t)")
 
 git -c user.name="sabbour-squad-lead[bot]" \
     -c user.email="sabbour-squad-lead[bot]@users.noreply.github.com" \
