@@ -58,10 +58,6 @@
       "types": "./dist/tools/index.d.ts",
       "import": "./dist/tools/index.js"
     },
-    "./identity": {
-      "types": "./dist/identity/index.d.ts",
-      "import": "./dist/identity/index.js"
-    },
     "./runtime": {
       "types": "./dist/runtime/config.d.ts",
       "import": "./dist/runtime/config.js"

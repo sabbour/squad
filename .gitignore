@@ -11,7 +11,6 @@ coverage/
 .squad/decisions/inbox/
 .squad/sessions/
 .squad/config.json
-.squad/identity/keys/
 
 # Test temp dirs (created in cwd by vitest tests, cleaned in afterEach)
 .test-*

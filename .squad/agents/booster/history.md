@@ -129,5 +129,3 @@ Analyzed 20 CI runs from March 15. Identified 3 distinct failure categories:
 5. **YAML fix** — Quoted `file:` in step names that were causing YAML parse ambiguity (both new and pre-existing)
 
 **Pipeline dependency chain:** `preflight → smoke-test → publish-sdk → publish-cli`
-
-📌 **Team update (2026-04-10T18:35:28Z):** CI deletion guard decision merged to `decisions.md`. Source tree canary + large deletion guard (>50 files without approval label) now documented. Incident #631 (361 file deletion) remediated. Branch protection on dev requested.

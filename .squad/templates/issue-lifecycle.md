@@ -211,9 +211,6 @@ Closes #{issue-number}
 {If working as a squad member:}
 Working as {member} ({role})
 
-{If identity configured (.squad/identity/config.json exists):}
-🤖 Created by [{app_slug}](https://github.com/apps/{app_slug})
-
 {If needs human review:}
 ⚠️ This task was flagged as "needs review" — please have a squad member review before merging.
 ```

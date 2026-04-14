@@ -38,7 +38,7 @@ import {
   clearTokenCache,
 } from '@bradygaster/squad-sdk';
 import type { IdentityConfig, IdentityTier, RoleSlug } from '@bradygaster/squad-sdk';
-import { resolveRoleSlug } from '@bradygaster/squad-sdk/identity';
+import { resolveRoleSlug } from '@bradygaster/squad-sdk';
 import { BOLD, RESET, GREEN, DIM, RED, YELLOW } from '../core/output.js';
 
 /** All canonical role slugs. */
