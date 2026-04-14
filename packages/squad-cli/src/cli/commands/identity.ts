@@ -179,6 +179,8 @@ async function waitForManifestCode(
   manifestTemplate: object,
 ): Promise<{ code: string; port: number }> {
   return new Promise((resolve, reject) => {
+    let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+
     const server = createServer((req, res) => {
       const url = new URL(req.url ?? '/', `http://localhost`);
 
@@ -217,6 +219,7 @@ async function waitForManifestCode(
   <h2>✅ GitHub App created!</h2>
   <p>You can close this tab and return to the terminal.</p>
 </body></html>`);
+        clearTimeout(timeoutHandle);
         server.close();
         resolve({ code, port });
         return;
@@ -239,10 +242,13 @@ async function waitForManifestCode(
       console.log(`  Waiting for GitHub App creation...\n`);
     });
 
-    server.on('error', reject);
+    server.on('error', (err) => {
+      clearTimeout(timeoutHandle);
+      reject(err);
+    });
 
     // Timeout after 5 minutes
-    setTimeout(() => {
+    timeoutHandle = setTimeout(() => {
       server.close();
       reject(new Error('Timed out waiting for GitHub App creation (5 min)'));
     }, 5 * 60 * 1000);
@@ -623,7 +629,7 @@ async function createAppForRole(
   console.log(`  Or type a custom app name`);
   const choice = await ask(`\n  Choice [1]: `);
 
-  if (choice === '2' || choice === '3') {
+  if (choice === '2') {
     let sourcePath = (await ask(
       `  Path to repo with existing identity (has .squad/identity/): `,
     )).replace(/^~/, process.env.HOME ?? process.env.USERPROFILE ?? '~');

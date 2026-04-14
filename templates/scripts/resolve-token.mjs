@@ -8,7 +8,8 @@
 
 import { createSign } from 'node:crypto';
 import { readFileSync, existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 // ============================================================================
 // Base64url helpers
@@ -207,7 +208,17 @@ if (!roleSlug) {
   process.exit(0);
 }
 
-const token = await resolveToken(process.cwd(), roleSlug);
+// Derive project root from script location (.squad/scripts/ → repo root).
+// Agents invoke this via absolute path so process.cwd() may be a worktree.
+let projectRoot = process.cwd();
+try {
+  const scriptDir = dirname(fileURLToPath(import.meta.url));
+  projectRoot = join(scriptDir, '..', '..');
+} catch {
+  // Fallback to cwd if import.meta.url is unavailable
+}
+
+const token = await resolveToken(projectRoot, roleSlug);
 if (token) {
   process.stdout.write(token);
 }
