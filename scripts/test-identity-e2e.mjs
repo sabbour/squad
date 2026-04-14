@@ -248,7 +248,7 @@ try {
   } else if (typeof token !== 'string' || token.length < 10) {
     fail('resolveToken returns a valid token string', `got ${typeof token}, length=${token?.length}`);
   } else {
-    pass(`resolveToken returns a token (${token.substring(0, 8)}...)`);
+    pass(`resolveToken returns a token of length ${token.length}`);
   }
 } catch (err) {
   fail('resolveToken', err.message);
