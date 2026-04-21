@@ -1,6 +1,6 @@
 ---
-"@squad/sdk": minor
-"@squad/cli": minor
+"@bradygaster/squad-sdk": minor
+"@bradygaster/squad-cli": minor
 ---
 
 feat(identity): hardening + kickstart sync quick wins
