@@ -19,7 +19,7 @@
 - Automatically set by GitHub Actions runners in every workflow step
 - Scoped to the workflow job (usually read-only repo + write to issues/PRs)
 - Short-lived (workflow step duration)
-- Cannot be explicitly set by users in Actions; it's a read-only secret
+- Automatically injected by Actions runners; can be overridden via the `permissions:` key or a step-level `env:` variable, but rarely needs to be
 
 **`GH_TOKEN`** (read by `gh` CLI primarily)
 - Set explicitly by Squad agents via `withRoleToken()` and `execWithRoleToken()`
@@ -129,8 +129,8 @@ gh api user  # which credential is used?
 
 **Precedence order (as enforced by `gh` CLI):**
 1. `GH_TOKEN` env var (if non-empty) ← **wins if set**
-2. Stored auth from `gh auth login` (in `~/.config/gh/hosts.yml`)
-3. `GITHUB_TOKEN` env var (if set; fallback only)
+2. `GITHUB_TOKEN` env var (if set)
+3. Stored auth from `gh auth login` (in `~/.config/gh/hosts.yml`)
 
 ---
 
@@ -293,6 +293,6 @@ gh auth status
 | Squad agents (`spawnAgent`) | `GH_TOKEN` (app token) | `GITHUB_TOKEN` if unset | SDK automatically |
 | GitHub Actions (no Squad) | `GITHUB_TOKEN` | Stored `gh auth` | Actions runner |
 | GitHub Actions + Squad | `GH_TOKEN` (app token) | `GITHUB_TOKEN` if unset | SDK during spawn |
-| Local development | Stored `gh auth` | `GH_TOKEN`, then `GITHUB_TOKEN` | User or script |
+| Local development | Stored `gh auth` (when no env vars set) | `GH_TOKEN`, then `GITHUB_TOKEN` | User or script |
 
 **Golden rule:** Squad agents always export `GH_TOKEN` when identity is configured. This token takes precedence over `GITHUB_TOKEN` because the `gh` CLI reads `GH_TOKEN` first.
