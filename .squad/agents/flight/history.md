@@ -201,3 +201,5 @@ All 13 findings correctly implemented in SDK `tokens.ts` and CLI template `resol
 Non-blocking: role slug resolution asymmetry (SDK doesn't auto-resolve aliases; CLI template does). H-06 gitignore tests simulate behavior rather than exercising `ensureKeysIgnored()` directly. FIDO's fake-timer and stderr spy concerns both resolved cleanly.
 
 Decision written to `.squad/decisions/inbox/flight-pr21-review.md`.
+
+📌 **Re-review (2026-04-21T01:07Z):** EECOM fixed both blockers in aeaba5c3. Changeset names corrected, all 4 resolve-token.mjs copies byte-identical at 283 lines. 142/142 tests green. Verdict upgraded to APPROVE. Merge is Ahmed's call.
