@@ -24,7 +24,7 @@
  */
 
 import { join } from 'node:path';
-import { existsSync, readdirSync, readFileSync, writeFileSync, mkdirSync, copyFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, writeFileSync, mkdirSync, copyFileSync, appendFileSync, chmodSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { createInterface } from 'node:readline';
 import { exec, execSync } from 'node:child_process';
@@ -43,7 +43,7 @@ import { BOLD, RESET, GREEN, DIM, RED, YELLOW } from '../core/output.js';
 
 /** All canonical role slugs. */
 const ALL_ROLES: readonly RoleSlug[] = [
-  'lead', 'frontend', 'backend', 'tester', 'devops', 'docs', 'security', 'data',
+  'lead', 'frontend', 'backend', 'tester', 'devops', 'docs', 'security', 'data', 'scribe',
 ];
 
 /** Default permissions for squad GitHub Apps. */
@@ -67,6 +67,7 @@ const ROLE_DESCRIPTIONS: Record<string, string> = {
   docs: 'Squad AI documentation writer — technical docs, API references, and guides.',
   security: 'Squad AI security engineer — threat modeling, audits, and secure coding.',
   data: 'Squad AI data engineer — databases, analytics, data pipelines, and modeling.',
+  scribe: 'Squad AI scribe — retro logs, pulse issues, velocity reports, and docs sweeps.',
   shared: 'Squad AI team — shared identity for all AI team member interactions.',
 };
 
@@ -94,6 +95,23 @@ function listAgents(projectRoot: string): string[] {
   return readdirSync(agentsDir, { withFileTypes: true })
     .filter(d => d.isDirectory())
     .map(d => d.name);
+}
+
+/**
+ * Ensure .squad/identity/keys/ is covered by .gitignore.
+ * Appends the rule if missing. Logs what it did.
+ */
+function ensureKeysIgnored(projectRoot: string): void {
+  const gitignorePath = join(projectRoot, '.gitignore');
+  const content = existsSync(gitignorePath) ? readFileSync(gitignorePath, 'utf-8') : '';
+  const covered =
+    content.includes('.squad/identity/keys') ||
+    content.includes('.squad/identity/keys/') ||
+    content.includes('*.pem');
+  if (!covered) {
+    appendFileSync(gitignorePath, '\n# Squad: private keys must never be committed\n.squad/identity/keys/\n');
+    console.log(`  ${GREEN}✓${RESET} Added .squad/identity/keys/ to .gitignore`);
+  }
 }
 
 /**
@@ -356,10 +374,13 @@ function saveCredentials(
   tier: IdentityTier,
   roleSlug?: RoleSlug,
 ): void {
-  // Save PEM key
+  // Save PEM key with restricted permissions (0o600 — owner read/write only)
   const keysDir = join(projectRoot, '.squad', 'identity', 'keys');
   mkdirSync(keysDir, { recursive: true });
-  writeFileSync(join(keysDir, `${key}.pem`), appData.pem, 'utf-8');
+  writeFileSync(join(keysDir, `${key}.pem`), appData.pem, { encoding: 'utf-8', mode: 0o600 });
+
+  // Ensure .gitignore covers the keys directory
+  ensureKeysIgnored(projectRoot);
 
   // Save app registration
   saveAppRegistration(projectRoot, key, {
@@ -568,10 +589,15 @@ async function importAppCredentials(
 
   console.log(`\n  Importing ${BOLD}${sourceReg.appSlug}${RESET} from source repo...`);
 
-  // Copy PEM key
+  // Copy PEM key (copyFileSync doesn't support mode; chmod separately)
   const targetKeysDir = join(targetRoot, '.squad', 'identity', 'keys');
   mkdirSync(targetKeysDir, { recursive: true });
-  copyFileSync(sourcePemPath, join(targetKeysDir, `${key}.pem`));
+  const targetPemPath = join(targetKeysDir, `${key}.pem`);
+  copyFileSync(sourcePemPath, targetPemPath);
+  try { chmodSync(targetPemPath, 0o600); } catch { /* non-fatal on platforms that don't support it */ }
+
+  // Ensure .gitignore covers the keys directory
+  ensureKeysIgnored(targetRoot);
 
   // Copy app registration (with installationId reset to 0 — new repo needs its own installation)
   const importedReg = { ...sourceReg, installationId: 0, roleSlug, tier };
@@ -1020,10 +1046,13 @@ async function runRotate(projectRoot: string, args: string[]): Promise<void> {
     process.exit(1);
   }
 
-  // Save the new PEM key
+  // Save the new PEM key with restricted permissions
   const keysDir = join(projectRoot, '.squad', 'identity', 'keys');
   mkdirSync(keysDir, { recursive: true });
-  writeFileSync(join(keysDir, `${roleArg}.pem`), pem, 'utf-8');
+  writeFileSync(join(keysDir, `${roleArg}.pem`), pem, { encoding: 'utf-8', mode: 0o600 });
+
+  // Ensure .gitignore covers the keys directory
+  ensureKeysIgnored(projectRoot);
 
   // Clear cached tokens so the next request uses the new key
   clearTokenCache();
